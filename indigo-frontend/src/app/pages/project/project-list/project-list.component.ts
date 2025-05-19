@@ -1,9 +1,5 @@
-import {
-  ButtonToggleComponent,
-  ToggleOption,
-} from '@/core/components/common/button-toggle/button-toggle.component';
 import { ButtonComponent } from '@/core/components/common/button/button.component';
-import { ToggleComponent } from '@/core/components/common/toggle/toggle.component';
+import { ListHeaderComponent } from '@/core/components/common/list-header/list-header.component';
 import { ProjectItemComponent } from '@/core/components/project/project-item/project-item.component';
 import { ProjectOverviewWidgetDirective } from '@/core/components/project/projects-overview-widget/directives/project-overview-widget.directive';
 import { InfiniteLoaderComponent } from '@/core/components/util/infinite-loader/infinite-loader.component';
@@ -35,13 +31,12 @@ import { ProjectAddComponent } from '../project-add/project-add.component';
     CommonModule,
     FormsModule,
     ProjectItemComponent,
-    ButtonToggleComponent,
     MatSlideToggleModule,
-    ToggleComponent,
     ClassPickerPipe,
     InfiniteLoaderComponent,
     ProjectOverviewWidgetDirective,
     ButtonComponent,
+    ListHeaderComponent,
   ],
 })
 export class ProjectListComponent
@@ -57,13 +52,6 @@ export class ProjectListComponent
     this.config.loadUrl = 'projects';
     this.initialize();
   }
-
-  options: ToggleOption[] = [{ value: 'grid', icon: 'indicon-grid' }];
-
-  viewOptions: ToggleOption[] = [
-    { value: 'grid', icon: 'indicon-grid' },
-    { value: 'list', icon: 'indicon-list' },
-  ];
 
   refreshList(): void {
     this.reload();

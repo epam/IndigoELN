@@ -1,11 +1,4 @@
-<div class="flex justify-between items-center my-4">
-  <eln-toggle label="My Entities" />
-  <eln-button-toggle
-    [(ngModel)]="selectedView"
-    [options]="viewOptions"
-    variant="alpha"
-  />
-</div>
+<eln-list-header (viewChange)="selectedView = $any($event)" />
 <div
   *ngIf="data$ | async as data"
   [@viewChange]="selectedView"
@@ -38,5 +31,3 @@
   <em class="text-xl indicon-plus"></em>
   <span class="whitespace-nowrap">Add Project</span>
 </eln-button>
-
-<!-- <eln-project-add #projectAddModal></eln-project-add> -->
