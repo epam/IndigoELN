@@ -15,6 +15,7 @@ import com.epam.indigoeln.reaction.model.units.WeightUnit;
 import com.epam.indigoeln.reaction.util.CalculationReportBuilder;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.security.TestSecurity;
+import lombok.SneakyThrows;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Order;
@@ -37,9 +38,7 @@ public class ExperimentModelServiceTest extends BaseTest {
     @BeforeAll
     void setUp(@TempDir Path tempDir) throws Exception {
         reportBuilder = new CalculationReportBuilder(new File("calculations.html"));
-        System.out.println("!!!1");
         miscClient.loadCompoundsFromFileClient("compounds.sdf", tempDir, getClass().getResourceAsStream("/Compound_000000001_000500000.1.sdf").readAllBytes());
-        System.out.println("!!!2");
         System.out.println(model);
     }
 
@@ -51,24 +50,17 @@ public class ExperimentModelServiceTest extends BaseTest {
     @Test
     @Order(0)
     void testCreateExperiment() {
-        System.out.println("!!!3");
         ProjectDetailsDTO project = projectsClient.createProject(new ProjectRequest("ExperimentModelServiceTest"));
-        System.out.println("!!!4");
         NotebookDetailsDTO notebook = notebooksClient.createNotebook(project.getId(), new NotebookRequest("ExperimentModelServiceTest"));
-        System.out.println("!!!5");
         experiment = experimentsClient.createExperiment(notebook.getId(), new ExperimentRequest("ExperimentModelServiceTest"));
-        System.out.println("!!!6");
         model = experimentsClient.getExperimentModel(experiment.getId());
     }
 
     @Test
     @Order(100)
     void testLoadReaction() throws Exception {
-        System.out.println("!!!7");
         String molFile = new String(getClass().getResourceAsStream("/reaction.rxn").readAllBytes());
-        System.out.println("!!!8");
         applyMutation(new ReactionMutation.SetScheme(0, molFile));
-        System.out.println("!!!9");
     }
 
     @Test
@@ -137,6 +129,7 @@ public class ExperimentModelServiceTest extends BaseTest {
         applyMutation(new ReactionOutputSampleMutation.SetOutputActualWeight(0, 1, 0, 10.0, WeightUnit.G));
     }
 
+    @SneakyThrows
     private void applyMutation(Mutation mutation) {
         System.out.println("Applying mutation: " + mutation);
         reportBuilder.addMutation(mutation);
