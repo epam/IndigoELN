@@ -5,6 +5,8 @@ import jakarta.validation.constraints.NotNull;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.util.Set;
+
 @Getter
 @Setter
 public class UserDTO extends BaseDTO {
@@ -22,7 +24,7 @@ public class UserDTO extends BaseDTO {
     String displayName;
 
     @NotNull
-    ApplicationRole[] roles;
+    Set<RoleRef> roles;
 
     @Override
     public String toString() {

@@ -6,6 +6,8 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import org.jspecify.annotations.Nullable;
 
+import java.util.List;
+
 @Data
 @AllArgsConstructor(onConstructor_ = @JsonCreator)
 public class UserRequest {
@@ -25,5 +27,6 @@ public class UserRequest {
     @Nullable
     private String password;
 
-    private ApplicationRole @Nullable [] roles;
+    @Nullable
+    private List<RoleRef> roles;
 }
