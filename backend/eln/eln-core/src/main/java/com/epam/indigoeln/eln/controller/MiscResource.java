@@ -30,8 +30,6 @@ public class MiscResource implements MiscAPI {
     ProjectService projectService;
     @Inject
     SupportService supportService;
-    @Inject
-    CompoundService compoundService;
 
     @Override
     public @NotNull @Valid TotalCounts getTotalCounts() {
@@ -46,18 +44,5 @@ public class MiscResource implements MiscAPI {
     @Override
     public void cleanupDatabase() {
         supportService.cleanupDatabase();
-    }
-
-    @Override
-    @SneakyThrows
-    public void loadCompoundsFromFile(UploadForm form) {
-        try (InputStream is = new BufferedInputStream(new FileInputStream(form.getFile().uploadedFile().toFile()))) {
-            compoundService.loadCompoundsFromFile(is);
-        }
-    }
-
-    @Override
-    public List<SampleDTO> findSamples(FindSamplesRequest request) {
-        return compoundService.findSamples(request);
     }
 }
