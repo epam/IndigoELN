@@ -1,3 +1,16 @@
+FROM public.ecr.aws/lambda/provided:al2-x86_64
+
+# Install Java
+RUN yum install -y java-21-amazon-corretto
+
+COPY target/quarkus-app/ ${LAMBDA_RUNTIME_DIR}/
+
+# Create bootstrap for Quarkus
+RUN echo "#!/bin/bash" >> ${LAMBDA_RUNTIME_DIR}/bootstrap
+RUN echo "cd ${LAMBDA_RUNTIME_DIR}" >> ${LAMBDA_RUNTIME_DIR}/bootstrap
+RUN echo "exec java -jar quarkus-run.jar" >> ${LAMBDA_RUNTIME_DIR}/bootstrap
+
+RUN chmod +x ${LAMBDA_RUNTIME_DIR}/bootstrap
 #FROM registry.access.redhat.com/ubi9/ubi-minimal:9.5 as packages
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.5
