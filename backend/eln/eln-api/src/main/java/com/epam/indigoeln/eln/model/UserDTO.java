@@ -15,12 +15,6 @@ public class UserDTO extends BaseDTO {
     String username;
 
     @NotEmpty
-    String firstName;
-
-    @NotEmpty
-    String lastName;
-
-    @NotEmpty
     String displayName;
 
     @NotNull
@@ -31,6 +25,7 @@ public class UserDTO extends BaseDTO {
         return "UserDTO{" +
                 "id=" + id +
                 ", username='" + username + '\'' +
+                ", roles="  + roles +
                 '}';
     }
 }
