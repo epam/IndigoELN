@@ -7,6 +7,7 @@ plugins {
 dependencies {
     implementation(project(":common:common-lambda"))
     implementation(project(":eln:eln-core"))
+    implementation(project(":eln:eln-core-aws"))
 }
 
 group = "com.epam.indigoeln"
