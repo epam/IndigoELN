@@ -1,0 +1,5 @@
+build
+!build/nativelibs
+!build/*runner*
+!build/function.zip
+!build/*.so
