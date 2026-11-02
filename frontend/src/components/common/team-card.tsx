@@ -60,12 +60,15 @@ function CopyUsernameButton({ username }: { username: string }) {
 function MemberRow({
   member,
   canManage,
+  cascades,
   updating,
   onLevelChange,
   onRemove,
 }: {
   member: ACLEntry;
   canManage: boolean;
+  /** Whether a removal here can take the member off everything below too (`deleteNested`). */
+  cascades: boolean;
   updating: boolean;
   onLevelChange: (level: AccessLevel) => void;
   onRemove: () => void;
@@ -73,8 +76,9 @@ function MemberRow({
   // AUTHOR is the creator's own entry; the backend rejects any change to it.
   const locked = isImmutableLevel(member.level) || !canManage;
   // Remove Member only for a member of this entity's own ACL: an inherited one stays on the
-  // parent's, and a Limited View one is hidden from removal at the maintainers' request (#805).
-  const removable = !member.inherited && !isDerivedLevel(member.level);
+  // parent's. A Limited View one has no entry of their own — the level comes from access below —
+  // so only a removal that cascades (`deleteNested`) takes them off, and only there is it offered.
+  const removable = !member.inherited && (!isDerivedLevel(member.level) || cascades);
 
   return (
     <li className={cn('grid items-center gap-x-2 py-2 text-[14px]/6', ROW_COLUMNS)}>
@@ -144,7 +148,9 @@ function MemberRow({
  * it will never fire.
  *
  * Remove Member asks first. `nestedRemovalLabel` is for a project or notebook: it adds a checkbox,
- * ticked by default, that sends `deleteNested` so the member also goes from everything below.
+ * ticked by default, that sends `deleteNested` so the member also goes from everything below. For
+ * a Limited View member the box is ticked and locked: their access *is* what is below, so removing
+ * them without the cascade would leave them exactly where they were.
  */
 export function TeamMembers({
   acl,
@@ -166,6 +172,7 @@ export function TeamMembers({
   const [removing, setRemoving] = useState<ACLEntry>();
   const [deleteNested, setDeleteNested] = useState(true);
   const suggestions = useUserSuggestions(inputValue);
+  const cascadeForced = removing !== undefined && isDerivedLevel(removing.level);
 
   // Already-members are dropped from the list rather than shown and rejected on submit.
   const members = new Set(acl.map((entry) => entry.username));
@@ -227,6 +234,7 @@ export function TeamMembers({
             key={member.username}
             member={member}
             canManage={canManage}
+            cascades={nestedRemovalLabel !== undefined}
             updating={updatingUsername === member.username}
             onLevelChange={(level) => changeLevel?.mutate([{ username: member.username, level }])}
             onRemove={() => {
@@ -246,7 +254,11 @@ export function TeamMembers({
         submitVariant="destructive"
         onSubmit={async () => {
           await changeLevel?.mutateAsync([
-            { username: removing!.username, level: 'NONE', ...(nestedRemovalLabel && { deleteNested }) },
+            {
+              username: removing!.username,
+              level: 'NONE',
+              ...(nestedRemovalLabel && { deleteNested: deleteNested || cascadeForced }),
+            },
           ]);
           setRemoveOpen(false);
         }}
@@ -255,10 +267,26 @@ export function TeamMembers({
           Are you sure you want to remove {removing?.displayName} from the team?
         </p>
         {nestedRemovalLabel && (
-          <label className="flex w-fit cursor-pointer items-center gap-2 text-[14px]/6 text-neutral-1000">
-            <Checkbox checked={deleteNested} onCheckedChange={setDeleteNested} />
-            {nestedRemovalLabel}
-          </label>
+          <div className="flex flex-col gap-1">
+            <label
+              className={cn(
+                'flex w-fit items-center gap-2 text-[14px]/6 text-neutral-1000',
+                !cascadeForced && 'cursor-pointer',
+              )}
+            >
+              <Checkbox
+                checked={deleteNested || cascadeForced}
+                disabled={cascadeForced}
+                onCheckedChange={setDeleteNested}
+              />
+              {nestedRemovalLabel}
+            </label>
+            {cascadeForced && (
+              <p className="pl-6 text-[12px]/5 text-neutral-700">
+                {removing.displayName} has Limited View because of access below, so that access goes too.
+              </p>
+            )}
+          </div>
         )}
       </FormDialog>
     </>

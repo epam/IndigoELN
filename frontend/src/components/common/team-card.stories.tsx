@@ -45,6 +45,13 @@ function ProjectTeamCard({ acl, canManage }: { acl: ACLEntry[]; canManage: boole
   );
 }
 
+/** The same card with no cascade on removal, as an experiment's team has none below it. */
+function ExperimentLikeTeamCard({ acl }: { acl: ACLEntry[] }) {
+  const addMembers = useUpdateProjectAccess(PROJECT_ID);
+  const changeLevel = useUpdateProjectAccess(PROJECT_ID);
+  return <TeamCard acl={acl} canManage addMembers={addMembers} changeLevel={changeLevel} />;
+}
+
 /**
  * The access mutation updates the cached project rather than any local state — so a story
  * that passes `acl` as a fixed prop can never show the result of a change. The interactive
@@ -164,8 +171,8 @@ export const LevelMenuChoices: Story = {
 };
 
 /**
- * Limited View is derived, so it is never offered and the row has no Remove Member — but the
- * member can be promoted: picking a level posts it, which gives them an entry of their own.
+ * Limited View is derived, so it is never offered as a level — but the member can be promoted:
+ * picking a level posts it, which gives them an entry of their own.
  */
 export const LimitedViewCanBePromoted: Story = {
   parameters: { msw: { handlers: spyHandlers } },
@@ -176,10 +183,46 @@ export const LimitedViewCanBePromoted: Story = {
     sent.length = 0;
     await userEvent.click(await within(canvasElement).findByRole('button', { name: /Limited View/ }));
     const items = await screen.findAllByRole('menuitem');
-    await expect(items.map((item) => item.textContent)).toEqual(['Admin', 'Can Edit', 'Can View']);
+    await expect(items.map((item) => item.textContent)).toEqual(['Admin', 'Can Edit', 'Can View', 'Remove Member']);
 
     await userEvent.click(screen.getByRole('menuitem', { name: 'Can View' }));
     await waitFor(() => expect(sent).toEqual([[{ username: 'anna.petrova', level: 'VIEW' }]]));
+  },
+};
+
+/**
+ * A Limited View member can be removed where removal cascades — their access *is* what is below,
+ * so the "Also remove…" box is ticked and locked, and `deleteNested` always goes out.
+ */
+export const LimitedViewRemovalCascades: Story = {
+  parameters: { msw: { handlers: spyHandlers } },
+  args: {
+    acl: [makeAclEntry('Administrator', { level: 'AUTHOR' }), makeAclEntry('Anna Petrova', { level: 'IMPLICIT_VIEW' })],
+  },
+  play: async ({ canvasElement }) => {
+    sent.length = 0;
+    await userEvent.click(await within(canvasElement).findByRole('button', { name: /Limited View/ }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Remove Member' }));
+
+    const cascade = await screen.findByRole('checkbox', { name: NESTED_REMOVAL_LABEL });
+    await expect(cascade).toBeChecked();
+    await expect(cascade).toHaveAttribute('aria-disabled', 'true');
+    await userEvent.click(screen.getByRole('button', { name: 'Remove' }));
+
+    await waitFor(() => expect(sent).toEqual([[{ username: 'anna.petrova', level: 'NONE', deleteNested: true }]]));
+  },
+};
+
+/** Without a cascade — an experiment's team — there is no removing a Limited View member. */
+export const LimitedViewWithoutCascade: Story = {
+  args: {
+    acl: [makeAclEntry('Administrator', { level: 'AUTHOR' }), makeAclEntry('Anna Petrova', { level: 'IMPLICIT_VIEW' })],
+  },
+  render: (args) => <ExperimentLikeTeamCard acl={args.acl} />,
+  play: async ({ canvasElement }) => {
+    await userEvent.click(await within(canvasElement).findByRole('button', { name: /Limited View/ }));
+    await expect(await screen.findByRole('menuitem', { name: 'Admin' })).toBeInTheDocument();
+    await expect(screen.queryByRole('menuitem', { name: 'Remove Member' })).not.toBeInTheDocument();
   },
 };
 
