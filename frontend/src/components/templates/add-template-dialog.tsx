@@ -13,17 +13,20 @@ import { TEMPLATE_NAME_MAX_LENGTH } from '@/lib/types/templates.ts';
  * where the template is built and saved in one go.
  *
  * The name is checked against `existingNames`, the list the page already holds, so a taken one
- * is refused before any tabs are built around it.
+ * is refused before any tabs are built around it — which is why `initializing` holds Save until
+ * that list has loaded.
  */
 export function AddTemplateDialog({
   open,
   onOpenChange,
   existingNames,
+  initializing,
   onSubmit,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   existingNames: readonly string[];
+  initializing?: boolean;
   onSubmit: (name: string) => void;
 }) {
   const form = useForm({
@@ -47,6 +50,7 @@ export function AddTemplateDialog({
           onOpenChange={onOpenChange}
           title="Add Template"
           submitDisabled={submitDisabled}
+          initializing={initializing}
           onSubmit={() => form.handleSubmit()}
         >
           <form.Field

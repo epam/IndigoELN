@@ -9,8 +9,9 @@ import { TEMPLATE_NAME_MAX_LENGTH } from '@/lib/types/templates.ts';
  * as the design renames it, rather than in a dialog.
  *
  * Enter or leaving the box saves, Escape gives up. A name that cannot be used says why under the
- * box and keeps it open; leaving it unchanged, or emptied, simply gives up, so a stray click away
- * never costs a request. A rejected save keeps the box open too, with what was typed.
+ * box: Enter then keeps it open to be corrected, while leaving the box gives up, as leaving it
+ * unchanged or emptied does — a click away is never a trap. A rejected save keeps the box open,
+ * with what was typed.
  */
 export function TemplateNameInput({
   name,
@@ -29,10 +30,10 @@ export function TemplateNameInput({
   const [saving, setSaving] = useState(false);
   const error = templateNameError(value, existingNames, name);
 
-  async function commit() {
+  async function commit(leaving: boolean) {
     const trimmed = value.trim();
     if (saving) return;
-    if (trimmed === name || trimmed === '') {
+    if (trimmed === name || trimmed === '' || (error && leaving)) {
       onCancel();
       return;
     }
@@ -41,7 +42,7 @@ export function TemplateNameInput({
     try {
       await onSave(trimmed);
     } catch {
-      // Stays open with what was typed; the failure is toasted by the mutation cache.
+      // Stays open with what was typed.
     } finally {
       setSaving(false);
     }
@@ -60,11 +61,11 @@ export function TemplateNameInput({
         disabled={saving}
         onChange={(event) => setValue(event.target.value)}
         onFocus={(event) => event.target.select()}
-        onBlur={() => void commit()}
+        onBlur={() => void commit(true)}
         onKeyDown={(event) => {
           if (event.key === 'Enter') {
             event.preventDefault();
-            void commit();
+            void commit(false);
           } else if (event.key === 'Escape') {
             event.preventDefault();
             onCancel();

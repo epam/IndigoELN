@@ -89,3 +89,33 @@ export const AsksBeforeDeleting: Story = {
     await expect(within(dialog).getByRole('button', { name: 'Delete' })).toBeEnabled();
   },
 };
+
+/** Clicking away from a taken name gives the rename up rather than trapping the box open. */
+export const LeavingATakenNameGivesUp: Story = {
+  parameters: {
+    msw: {
+      handlers: [
+        http.patch('/api/eln/templates/:id', async ({ request }) => {
+          renamed.push(await request.json());
+          return HttpResponse.json(makeTemplateDetails());
+        }),
+        ...handlers,
+      ],
+    },
+  },
+  play: async ({ canvasElement }) => {
+    renamed.length = 0;
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole('button', { name: 'Actions for Default' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Rename' }));
+
+    const input = await canvas.findByRole('textbox', { name: 'Template Name' });
+    await userEvent.clear(input);
+    await userEvent.type(input, 'Analytical');
+    await userEvent.tab();
+
+    await waitFor(() => expect(canvas.queryByRole('textbox')).not.toBeInTheDocument());
+    await expect(canvas.getByRole('link', { name: 'Default' })).toBeInTheDocument();
+    await expect(renamed).toEqual([]);
+  },
+};

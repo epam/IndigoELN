@@ -1,13 +1,13 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { Plus } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 
 import { RequirePermission } from '@/components/auth/require-permission';
 import { ActionBar } from '@/components/common/action-bar';
 import { AddTemplateDialog } from '@/components/templates/add-template-dialog';
 import { TemplateList } from '@/components/templates/template-list';
 import { Button } from '@/components/ui/button';
-import { useFilteredTemplates, useTemplates } from '@/lib/api/templates';
+import { useFilteredTemplates, useTemplateNames } from '@/lib/api/templates';
 import { usePageTitle } from '@/lib/hooks/use-page-title';
 import { z } from '@/lib/zod';
 import { SORT_ORDERS, type SortOrder } from '@/lib/types/common.ts';
@@ -43,9 +43,7 @@ function TemplatesPage() {
   const [addOpen, setAddOpen] = useState(false);
 
   const query = useFilteredTemplates({ search: q ?? '', sort, createdByMe });
-  // Every name, whatever the filters show — the cached list the Add Experiment picker shares.
-  const all = useTemplates(true);
-  const existingNames = useMemo(() => (all.data?.items ?? []).map((template) => template.name), [all.data]);
+  const { names: existingNames, isPending: namesPending } = useTemplateNames();
 
   // replace: keystrokes and toggles should not each become a history entry.
   const patch = (next: Partial<z.infer<typeof searchSchema>>) =>
@@ -74,6 +72,7 @@ function TemplatesPage() {
         open={addOpen}
         onOpenChange={setAddOpen}
         existingNames={existingNames}
+        initializing={namesPending}
         // Nothing is saved yet: the constructor builds the tabs, and Save there creates it.
         onSubmit={(name) => void navigate({ to: '/templates/new', search: { name } })}
       />

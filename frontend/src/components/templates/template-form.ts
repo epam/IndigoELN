@@ -9,7 +9,7 @@ import type {
 } from '@/lib/types/templates.ts';
 import { TEMPLATE_COMPONENT_TYPES, TEMPLATE_NAME_MAX_LENGTH } from '@/lib/types/templates.ts';
 
-export const templateNameSchema = z
+const templateNameSchema = z
   .string()
   .trim()
   .min(1, 'Template Name is required')
@@ -41,7 +41,7 @@ export interface ComponentPosition {
 export const EMPTY_TEMPLATE: readonly TemplateTab[] = [{ name: 'Tab 1', components: [] }];
 
 /** A component as it is first placed. The stoichiometry table starts with every block on. */
-export function newComponent(type: TemplateComponentType): TemplateComponent {
+function newComponent(type: TemplateComponentType): TemplateComponent {
   return type === 'stoichiometryTable'
     ? { type, reactionScheme: true, reactantsReagentsSolvents: true, intendedProducts: true }
     : { type };

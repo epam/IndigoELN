@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMemo } from 'react';
 
 import { apiFetch } from '@/lib/api';
 import { useSettledSearch } from '@/lib/api/collections';
@@ -56,6 +57,17 @@ export function useTemplates(enabled: boolean) {
     // note on `useTemplate` for why the default gcTime would take it off disk again.
     gcTime: Infinity,
   });
+}
+
+/**
+ * Every template's name, for refusing a taken one as it is typed — from the cached whole list,
+ * whatever filters the screen shows. `isPending` until it has loaded: a check against an empty
+ * list would pass any name, and the taken one would only surface when the backend refused it.
+ */
+export function useTemplateNames() {
+  const { data, isPending } = useTemplates(true);
+  const names = useMemo(() => (data?.items ?? []).map((template) => template.name), [data]);
+  return { names, isPending };
 }
 
 function fetchFilteredTemplates(filters: CollectionFilters, signal?: AbortSignal): Promise<Page<Template>> {

@@ -35,3 +35,12 @@ export const RefusesTakenName: Story = {
     await expect(args.onSubmit).not.toHaveBeenCalled();
   },
 };
+
+/** Until the names are in, Save waits — a taken name would otherwise pass unnoticed. */
+export const WaitsForTheNames: Story = {
+  args: { initializing: true },
+  play: async () => {
+    const dialog = within(await screen.findByRole('dialog', { name: 'Add Template' }));
+    await expect(dialog.getByRole('button', { name: 'Save' })).toBeDisabled();
+  },
+};

@@ -376,7 +376,7 @@ export function TemplateConstructor({
     );
   }
 
-  const template = (
+  const templatePanel = (
     <Panel
       title="Template"
       action={
@@ -408,9 +408,9 @@ export function TemplateConstructor({
   return editable ? (
     <div className="grid grid-cols-[repeat(auto-fit,minmax(320px,1fr))] items-start gap-4">
       {palette}
-      {template}
+      {templatePanel}
     </div>
   ) : (
-    template
+    templatePanel
   );
 }

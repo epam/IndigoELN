@@ -141,6 +141,13 @@ describe('templates routes', () => {
       expect(apiFetch).toHaveBeenCalledWith(`/api/eln/templates/${DEFAULT.id}`, { method: 'DELETE' }),
     );
     await waitFor(() => expect(router.state.location.pathname).toBe('/templates'));
+    // The page let go of the template rather than fetching it back — and toasting the refusal.
+    const calls = apiFetch.mock.calls;
+    const deletedAt = calls.findIndex(([, init]) => init?.method === 'DELETE');
+    const refetched = calls
+      .slice(deletedAt + 1)
+      .some(([path, init]) => path === `/api/eln/templates/${DEFAULT.id}` && !init?.method);
+    expect(refetched).toBe(false);
   });
 
   /** Without MANAGE_TEMPLATES the page is not shown at all. */

@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { Pencil, Trash2 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 
 import { RequirePermission } from '@/components/auth/require-permission';
 import { DeleteTemplateDialog } from '@/components/templates/delete-template-dialog';
@@ -11,7 +11,7 @@ import { TemplateNameInput } from '@/components/templates/template-name-input';
 import { TemplatePreview } from '@/components/templates/template-preview';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useDeleteTemplate, useRenameTemplate, useTemplate, useTemplates } from '@/lib/api/templates';
+import { useDeleteTemplate, useRenameTemplate, useTemplate, useTemplateNames } from '@/lib/api/templates';
 import { usePageTitle } from '@/lib/hooks/use-page-title';
 import { z } from '@/lib/zod';
 
@@ -36,15 +36,20 @@ function TemplatePage() {
   const { id } = Route.useParams();
   const { view } = Route.useSearch();
   const navigate = Route.useNavigate();
-  const { data: template, isPending, isError } = useTemplate(id);
-  usePageTitle(template && `Template ${template.name}`);
-
   const rename = useRenameTemplate();
   const remove = useDeleteTemplate();
-  const all = useTemplates(true);
-  const existingNames = useMemo(() => (all.data?.items ?? []).map((item) => item.name), [all.data]);
+  // Once deleted, stop observing the template: the delete drops it from the cache, and a page
+  // still watching would fetch it straight back — and toast the refusal — before the navigation
+  // away has landed.
+  const deleted = remove.isSuccess;
+  const { data: template, isPending, isError } = useTemplate(deleted ? undefined : id);
+  usePageTitle(template && `Template ${template.name}`);
+
+  const { names: existingNames } = useTemplateNames();
   const [renaming, setRenaming] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  if (deleted) return null;
 
   if (isPending) {
     return (

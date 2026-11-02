@@ -304,7 +304,7 @@ to queue behind the on-blur saves rather than race them.
 | `projects.ts` | `Project`, `ProjectDetails`, `ProjectRequest`, `ProjectEditRequest`, `TotalCounts`, `PROJECT_NAME_MAX_LENGTH` |
 | `notebooks.ts` | `BaseNotebook`, `Notebook`, `NOTEBOOK_NAME_LENGTH` |
 | `user.ts` | `CurrentUser`, `ApplicationPermission` |
-| `templates.ts` | `TemplateComponent` (the six-member union), `TemplateTab`, `Template`, `TemplateDetails`, `TemplateRequest`, `TemplateEditRequest`, and their companion tables — `COMPONENT_TITLES`, `COMPONENT_LABELS`, `COMPONENT_DESCRIPTIONS`, `TEMPLATE_COMPONENT_TYPES` (palette order), `STOICHIOMETRY_PARTS` and `STOICHIOMETRY_PART_LABELS` |
+| `templates.ts` | `TemplateComponent` (the six-member union), `TemplateTab`, `Template`, `TemplateDetails`, `TemplateRequest`, `TemplateEditRequest`, `StoichiometryPart`, `TEMPLATE_NAME_MAX_LENGTH`, and their companion tables — `COMPONENT_TITLES`, `COMPONENT_LABELS`, `COMPONENT_DESCRIPTIONS`, `TEMPLATE_COMPONENT_TYPES` (palette order), `STOICHIOMETRY_PARTS` and `STOICHIOMETRY_PART_LABELS` |
 | `reactions.ts` | the `reaction/model` tree: `ExperimentModel`, `Reaction`, `ReactionInput`/`Output` and their samples, `CompoundRef`, `EnteredValue`, the unit unions, and the companion table of every enum in it — `REACTION_ROLE_LABELS`, `OUTPUT_TYPE_LABELS`, `unitLabel()`, the unit option arrays |
 | `mutations.ts` | `Mutation` (all 98 members of the backend's `@JsonSubTypes` list), `ModelMutation` (the subset `/mutate` accepts), `MutationResponse` |
 

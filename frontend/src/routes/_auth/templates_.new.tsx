@@ -1,6 +1,6 @@
 import { createFileRoute, redirect, useBlocker } from '@tanstack/react-router';
 import { Pencil } from 'lucide-react';
-import { useMemo, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 
 import { RequirePermission } from '@/components/auth/require-permission';
 import { FormDialog } from '@/components/common/form-dialog';
@@ -10,7 +10,7 @@ import { TemplateLayout } from '@/components/templates/template-layout';
 import { TemplateNameInput } from '@/components/templates/template-name-input';
 import { TemplatePreview } from '@/components/templates/template-preview';
 import { Button } from '@/components/ui/button';
-import { useCreateTemplate, useTemplates } from '@/lib/api/templates';
+import { useCreateTemplate, useTemplateNames } from '@/lib/api/templates';
 import { usePageTitle } from '@/lib/hooks/use-page-title';
 import { z } from '@/lib/zod';
 
@@ -47,14 +47,13 @@ function NewTemplatePage() {
   usePageTitle(`New Template ${name}`);
 
   const [tabs, setTabs] = useState<TemplateTab[]>(() => [...EMPTY_TEMPLATE]);
-  const [tried, setTried] = useState(false);
+  const [saveAttempted, setSaveAttempted] = useState(false);
   const [renaming, setRenaming] = useState(false);
   // A ref, not state: the navigation after Save runs in the same tick, before any re-render could
   // hand the blocker a fresh closure.
   const saved = useRef(false);
   const create = useCreateTemplate();
-  const all = useTemplates(true);
-  const existingNames = useMemo(() => (all.data?.items ?? []).map((template) => template.name), [all.data]);
+  const { names: existingNames } = useTemplateNames();
 
   const touched = tabs.some((tab) => tab.components.length > 0) || tabs.length > 1;
   // Switching Constructor and Preview, or renaming, stays on this route and is never held up.
@@ -67,7 +66,7 @@ function NewTemplatePage() {
   const valid = tabs.length > 0 && tabs.every((tab) => tabError(tab) === undefined);
 
   async function save() {
-    setTried(true);
+    setSaveAttempted(true);
     if (!valid) {
       void navigate({ search: (prev) => ({ ...prev, view: 'constructor' }), replace: true });
       return;
@@ -128,7 +127,7 @@ function NewTemplatePage() {
             </Button>
           </>
         }
-        constructorPanel={<TemplateConstructor tabs={tabs} onChange={setTabs} showErrors={tried} />}
+        constructorPanel={<TemplateConstructor tabs={tabs} onChange={setTabs} showErrors={saveAttempted} />}
         previewPanel={<TemplatePreview tabs={tabs} />}
       />
       <FormDialog
