@@ -18,8 +18,7 @@ vi.mock('@/lib/api', async () => {
 
 const { routeTree } = await import('@/routeTree.gen');
 
-// TEMPLATES[0] is the fixture named 'Default' — the starter Add Template copies.
-const [STARTER, OTHER] = TEMPLATES;
+const [DEFAULT] = TEMPLATES;
 const MANAGER = makeCurrentUser({ permissions: ['VIEW_PROJECTS', 'MANAGE_TEMPLATES'] });
 
 let currentUser = MANAGER;
@@ -41,11 +40,15 @@ function respond(path: string, init?: { method?: string; json?: unknown }) {
     });
   }
   const detail = path.match(/^\/api\/eln\/templates\/(.+)$/);
+  if (detail && init?.method === 'PATCH') {
+    return Promise.resolve(makeTemplateDetails({ id: detail[1], name: (init.json as { name: string }).name }));
+  }
+  if (detail && init?.method === 'DELETE') return Promise.resolve(null);
   if (detail) return Promise.resolve(makeTemplateDetails({ id: detail[1] }));
   return Promise.resolve([]);
 }
 
-async function renderTemplates(initial = '/templates') {
+async function renderAt(initial: string) {
   const router = createRouter({ routeTree, history: createMemoryHistory({ initialEntries: [initial] }) });
   await router.load();
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -60,7 +63,7 @@ async function renderTemplates(initial = '/templates') {
 
 const paths = () => apiFetch.mock.calls.map(([path]) => String(path));
 
-describe('templates route', () => {
+describe('templates routes', () => {
   beforeEach(() => {
     currentUser = MANAGER;
     apiFetch.mockReset();
@@ -68,51 +71,82 @@ describe('templates route', () => {
   });
 
   /**
-   * The exact URLs, asserted here because the fetchers are module-private: the whole list in one
-   * page (the backend's default page is 10), and the Default template Add Template starts from.
+   * The exact URLs, asserted here because the fetchers are module-private: the filtered list in one
+   * page (the backend's default page is 10), and the whole one every name is checked against.
    */
-  it('loads the whole list, and the starter template by id', async () => {
-    await renderTemplates();
+  it('lists templates as the action bar filters them', async () => {
+    await renderAt('/templates?q=acid&sort=EARLIEST&createdByMe=true');
 
-    await waitFor(() => expect(paths()).toContain('/api/eln/templates?pageSize=100'));
-    await waitFor(() => expect(paths()).toContain(`/api/eln/templates/${STARTER.id}`));
+    await waitFor(() =>
+      expect(paths()).toContain('/api/eln/templates?sort=EARLIEST&pageSize=100&search=acid&createdByMe=true'),
+    );
+    expect(paths()).toContain('/api/eln/templates?pageSize=100');
   });
 
-  /** Opening a template is a URL change, so the sheet is linkable and Back closes it. */
-  it('puts the open template in the search params and loads its tabs', async () => {
-    const router = await renderTemplates();
-
-    await userEvent.click(await screen.findByRole('button', { name: new RegExp(OTHER.name) }));
-
-    await waitFor(() => expect(router.state.location.search).toMatchObject({ template: OTHER.id }));
-    await waitFor(() => expect(paths()).toContain(`/api/eln/templates/${OTHER.id}`));
-    expect(await screen.findByText('About Template')).toBeInTheDocument();
-  });
-
-  /** Add Template posts to /templates — with the starter's structure under the typed name. */
-  it('creates a template through POST /templates', async () => {
-    await renderTemplates();
+  /** Add Template takes a name; the constructor builds the tabs, and Save posts them together. */
+  it('builds a template in the constructor and creates it through POST /templates', async () => {
+    const router = await renderAt('/templates');
 
     await userEvent.click(await screen.findByRole('button', { name: 'Add Template' }));
-    const name = await screen.findByLabelText(/Template Name/);
-    await waitFor(() =>
-      expect(screen.getByLabelText(/Tab 1 Name/)).toHaveValue(makeTemplateDetails().templateTabs[0].name),
-    );
-    await userEvent.type(name, 'Synthesis');
+    await userEvent.type(await screen.findByLabelText(/Template Name/), 'Synthesis');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/templates/new'));
+    expect(apiFetch).not.toHaveBeenCalledWith('/api/eln/templates', expect.anything());
+
+    // An empty tab cannot be saved, and says so.
+    await userEvent.click(await screen.findByRole('button', { name: 'Save' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Add at least one component');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Add Experiment Details to Tab 1' }));
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() =>
       expect(apiFetch).toHaveBeenCalledWith('/api/eln/templates', {
         method: 'POST',
-        json: { name: 'Synthesis', templateTabs: makeTemplateDetails().templateTabs },
+        json: { name: 'Synthesis', templateTabs: [{ name: 'Tab 1', components: [{ type: 'experimentDetails' }] }] },
       }),
     );
+    await waitFor(() => expect(router.state.location.pathname).toBe('/templates/created'));
+  });
+
+  /** There is no building a template without a name. */
+  it('sends /templates/new without a name back to the list', async () => {
+    const router = await renderAt('/templates/new');
+    await waitFor(() => expect(router.state.location.pathname).toBe('/templates'));
+  });
+
+  it('renames a template through PATCH, with the name alone', async () => {
+    await renderAt(`/templates/${DEFAULT.id}`);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Rename template' }));
+    const input = screen.getByRole('textbox', { name: 'Template Name' });
+    await userEvent.clear(input);
+    await userEvent.type(input, 'Synthesis{Enter}');
+
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith(`/api/eln/templates/${DEFAULT.id}`, {
+        method: 'PATCH',
+        json: { name: 'Synthesis' },
+      }),
+    );
+  });
+
+  it('deletes a template, and goes back to the list', async () => {
+    const router = await renderAt(`/templates/${DEFAULT.id}`);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Delete template' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith(`/api/eln/templates/${DEFAULT.id}`, { method: 'DELETE' }),
+    );
+    await waitFor(() => expect(router.state.location.pathname).toBe('/templates'));
   });
 
   /** Without MANAGE_TEMPLATES the page is not shown at all. */
   it('turns away a user without MANAGE_TEMPLATES', async () => {
     currentUser = makeCurrentUser({ permissions: ['VIEW_PROJECTS'] });
-    const router = await renderTemplates();
+    const router = await renderAt('/templates');
 
     await waitFor(() => expect(router.state.location.pathname).not.toBe('/templates'));
     expect(screen.queryByRole('heading', { name: 'Templates' })).not.toBeInTheDocument();

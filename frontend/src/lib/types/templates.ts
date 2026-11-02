@@ -64,7 +64,7 @@ export interface TemplateDetails extends Template {
 export const TEMPLATE_NAME_MAX_LENGTH = 256;
 
 /**
- * Every component type, in the order a tab lays them out when a template is built in the app —
+ * Every component type, in the order the template constructor's palette offers them in —
  * the order the experiment screen reads top to bottom. `satisfies` against the union keeps a new
  * backend type from being left off.
  */
@@ -91,6 +91,19 @@ export const COMPONENT_LABELS: Record<TemplateComponentType, string> = {
   versionHistory: 'Version History',
 };
 
+/**
+ * One line on what each component gives an experiment — under its name in the template
+ * constructor's palette, so whoever builds a template can tell the components apart.
+ */
+export const COMPONENT_DESCRIPTIONS: Record<TemplateComponentType, string> = {
+  experimentDetails: 'Title, therapeutic area, project code, co-authors, keywords and linked experiments.',
+  experimentDescription: 'A rich-text description of the experiment, with formatting, images and tables.',
+  attachments: 'Files of any kind attached to the experiment.',
+  stoichiometryTable: 'The reaction scheme, the reactants, reagents and solvents, and the reaction products.',
+  batches: 'Every product batch in a table, to review, create and edit them.',
+  versionHistory: "The experiment's earlier versions.",
+};
+
 /** The three sub-blocks a `stoichiometryTable` component switches on, keyed as on the wire. */
 export type StoichiometryPart = 'reactionScheme' | 'reactantsReagentsSolvents' | 'intendedProducts';
 
@@ -108,8 +121,16 @@ export const STOICHIOMETRY_PART_LABELS: Record<StoichiometryPart, string> = {
   intendedProducts: 'Reaction Products',
 };
 
-/** Body of `POST /templates`. Both fields are `@NotEmpty`, and so is every tab's `components`. */
+/**
+ * Body of `POST /templates`. Both fields are `@NotEmpty`, and so is every tab's `components`; a
+ * tab may not hold the same component twice (`TemplateValidationUtil`).
+ */
 export interface TemplateRequest {
   name: string;
   templateTabs: TemplateTab[];
+}
+
+/** Body of `PATCH /templates/{id}` — the name is all a saved template lets change. */
+export interface TemplateEditRequest {
+  name: string;
 }

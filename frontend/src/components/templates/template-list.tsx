@@ -12,20 +12,18 @@ const FIRST_LOAD_SKELETONS = 4;
 const LIST_CLASS = 'flex flex-col gap-3';
 
 /**
- * The templates, as stacked rows — `DictionaryList`'s three branches over `useTemplates`, which
- * asks for one page big enough to be the whole list, so there is no second page to load.
+ * The templates, as stacked rows — `DictionaryList`'s three branches over the filtered list, which
+ * asks for one page big enough to be the whole of it, so there is no second page to load.
  *
- * The query is passed in: the route needs the same list to resolve its search param and to tell
- * Add Template which names are taken.
+ * `existingNames` is every template's name, not only the ones the filters leave showing: a rename
+ * is checked against all of them.
  */
 export function TemplateList({
   query,
-  selectedId,
-  onSelect,
+  existingNames,
 }: {
   query: UseQueryResult<Page<Template>, Error>;
-  selectedId: string | undefined;
-  onSelect: (template: Template) => void;
+  existingNames: readonly string[];
 }) {
   const { data, error, isPending } = query;
 
@@ -45,18 +43,13 @@ export function TemplateList({
   }
 
   if (data.items.length === 0) {
-    return <p className="text-[14px]/6 text-neutral-700">No templates yet.</p>;
+    return <p className="text-[14px]/6 text-neutral-700">No templates found.</p>;
   }
 
   return (
     <div className={LIST_CLASS}>
       {data.items.map((template) => (
-        <TemplateRow
-          key={template.id}
-          template={template}
-          selected={template.id === selectedId}
-          onSelect={() => onSelect(template)}
-        />
+        <TemplateRow key={template.id} template={template} existingNames={existingNames} />
       ))}
     </div>
   );

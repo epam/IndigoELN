@@ -49,7 +49,7 @@ import type { NotebookEditRequest, NotebookRequest } from '@/lib/types/notebooks
 import type { ProjectEditRequest } from '@/lib/types/projects.ts';
 import type { FindSamplesRequest, SampleDTO, SearchCatalog } from '@/lib/types/samples.ts';
 import type { SignatureDocument } from '@/lib/types/signatures.ts';
-import type { TemplateRequest } from '@/lib/types/templates.ts';
+import type { TemplateEditRequest, TemplateRequest } from '@/lib/types/templates.ts';
 
 // apiFetch sends the path verbatim, so handlers match the same full paths the
 // callers in src/lib/api/ pass.
@@ -380,6 +380,11 @@ export const handlers = [
       }),
     );
   }),
+  http.patch(`${ELN}/templates/:id`, async ({ params, request }) => {
+    const { name } = (await request.json()) as TemplateEditRequest;
+    return HttpResponse.json(makeTemplateDetails({ id: String(params.id), name }));
+  }),
+  http.delete(`${ELN}/templates/:id`, () => new HttpResponse(null, { status: 204 })),
   http.patch(`${ELN}/experiments/:id`, async ({ params, request }) => {
     const { title, therapeuticArea, projectCode, description, literature, ...lists } =
       (await request.json()) as ExperimentEditRequest;

@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils';
 
 /** Widths only — the column count and heights mirror TemplateRow so nothing shifts when data lands. */
 const COLUMNS = [
+  { label: 'w-20', value: 'w-32' },
   { label: 'w-16', value: 'w-48' },
   { label: 'w-20', value: 'w-48' },
 ];

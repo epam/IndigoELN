@@ -1,125 +1,151 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  EMPTY_TEMPLATE_TAB,
-  startingTemplateForm,
-  tabComponentsError,
-  tabNameError,
-  templateFormErrors,
+  addComponent,
+  addTab,
+  availableComponents,
+  moveComponent,
+  removeComponent,
+  removeTab,
+  renameTab,
+  setStoichiometryPart,
+  tabError,
   templateNameError,
-  toggleComponent,
   toTemplateRequest,
 } from '@/components/templates/template-form';
-import { makeTemplateDetails } from '@/mocks/fixtures';
 
-import type { TemplateTabValues } from '@/components/templates/template-form';
+import type { TemplateTab } from '@/lib/types/templates.ts';
 
-function tab(overrides: Partial<TemplateTabValues> = {}): TemplateTabValues {
-  return { ...EMPTY_TEMPLATE_TAB, ...overrides };
-}
+const TABS: TemplateTab[] = [
+  { name: 'Reaction', components: [{ type: 'experimentDetails' }, { type: 'attachments' }, { type: 'batches' }] },
+  { name: 'Summary', components: [{ type: 'versionHistory' }] },
+];
 
-describe('toggleComponent', () => {
-  /** The layout order is the list's, never the order the boxes were clicked in. */
-  it('keeps the components in layout order whatever order they are ticked in', () => {
-    let components = toggleComponent([], 'versionHistory', true);
-    components = toggleComponent(components, 'experimentDetails', true);
-    components = toggleComponent(components, 'stoichiometryTable', true);
-    expect(components).toEqual(['experimentDetails', 'stoichiometryTable', 'versionHistory']);
-
-    expect(toggleComponent(components, 'stoichiometryTable', false)).toEqual(['experimentDetails', 'versionHistory']);
-  });
-});
+const types = (tab: TemplateTab) => tab.components.map((component) => component.type);
 
 describe('templateNameError', () => {
-  it('requires a name, and refuses one already taken once trimmed', () => {
+  it('requires a name, and refuses one already taken', () => {
     expect(templateNameError('  ', [])).toBe('Template Name is required');
     expect(templateNameError(' Default ', ['Default'])).toBe("Template 'Default' already exists");
-    expect(templateNameError('Default 2', ['Default'])).toBeUndefined();
+    expect(templateNameError('Synthesis', ['Default'])).toBeUndefined();
+  });
+
+  /** Renaming leaves a template its own name — taken, but by itself. */
+  it('lets a template keep its own name', () => {
+    expect(templateNameError('Default', ['Default'], 'Default')).toBeUndefined();
   });
 });
 
-describe('tabNameError', () => {
-  /** Only required: the backend allows two tabs one name, and the experiment screen copes. */
-  it('requires a name, and nothing more', () => {
-    expect(tabNameError(tab({ name: '  ' }))).toBe('Tab Name is required');
-    expect(tabNameError(tab({ name: 'Reaction' }))).toBeUndefined();
-  });
-});
-
-describe('tabComponentsError', () => {
-  it('wants at least one component, and at least one stoichiometry block if that one is on', () => {
-    expect(tabComponentsError(tab())).toBe('Pick at least one component');
+describe('tabs', () => {
+  it('names a new tab after the first free number', () => {
+    expect(addTab([{ name: 'Tab 2', components: [] }]).at(-1)?.name).toBe('Tab 3');
     expect(
-      tabComponentsError(
-        tab({
-          components: ['stoichiometryTable'],
-          stoichiometry: { reactionScheme: false, reactantsReagentsSolvents: false, intendedProducts: false },
-        }),
-      ),
-    ).toBe('Pick at least one part of the Stoichiometric Calculation');
-    expect(tabComponentsError(tab({ components: ['attachments'] }))).toBeUndefined();
+      addTab([
+        { name: 'Tab 1', components: [] },
+        { name: 'Tab 3', components: [] },
+      ]).at(-1)?.name,
+    ).toBe('Tab 4');
+  });
+
+  it('renames and removes a tab by position', () => {
+    expect(renameTab(TABS, 1, 'History')[1].name).toBe('History');
+    expect(removeTab(TABS, 0).map((tab) => tab.name)).toEqual(['Summary']);
   });
 });
 
-describe('templateFormErrors', () => {
-  /** Keyed the way a TanStack form-level validator hands errors to its fields. */
-  it('puts each message under the field it belongs to, and is empty when all is well', () => {
-    const good = tab({ name: 'Reaction', components: ['experimentDetails'] });
-    expect(templateFormErrors({ name: 'New', tabs: [good] }, [])).toEqual({});
-    expect(templateFormErrors({ name: 'Default', tabs: [good, tab({ name: '' })] }, ['Default'])).toEqual({
-      name: "Template 'Default' already exists",
-      'tabs[1].name': 'Tab Name is required',
-      'tabs[1].components': 'Pick at least one component',
+describe('placing components', () => {
+  /** A tab holds each component once — the backend's own rule — but two tabs may share one. */
+  it('offers only what the tab does not hold yet', () => {
+    expect(availableComponents(TABS[1])).toEqual([
+      'experimentDetails',
+      'experimentDescription',
+      'stoichiometryTable',
+      'batches',
+      'attachments',
+    ]);
+    expect(addComponent(TABS, 0, 'attachments')).toEqual(TABS);
+  });
+
+  it('adds at the end, or where it was dropped', () => {
+    expect(types(addComponent(TABS, 1, 'batches')[1])).toEqual(['versionHistory', 'batches']);
+    expect(types(addComponent(TABS, 0, 'experimentDescription', 1)[0])).toEqual([
+      'experimentDetails',
+      'experimentDescription',
+      'attachments',
+      'batches',
+    ]);
+  });
+
+  it('starts a stoichiometry table with every block on, and switches them one by one', () => {
+    const placed = addComponent(TABS, 1, 'stoichiometryTable', 0);
+    expect(placed[1].components[0]).toEqual({
+      type: 'stoichiometryTable',
+      reactionScheme: true,
+      reactantsReagentsSolvents: true,
+      intendedProducts: true,
     });
+    const off = setStoichiometryPart(placed, { tab: 1, index: 0 }, 'intendedProducts', false);
+    expect(off[1].components[0]).toMatchObject({ intendedProducts: false, reactionScheme: true });
+  });
+
+  it('removes a component', () => {
+    expect(types(removeComponent(TABS, { tab: 0, index: 1 })[0])).toEqual(['experimentDetails', 'batches']);
   });
 });
 
-describe('startingTemplateForm', () => {
-  /** A copy of the starter's tabs, so a name and Save are enough — issue #739's steps. */
-  it("copies the starter's tabs, its stoichiometry blocks included, with no name", () => {
-    const starter = makeTemplateDetails().templateTabs;
-    const form = startingTemplateForm(starter);
-    expect(form.name).toBe('');
-    expect(form.tabs.map((copy) => copy.name)).toEqual(starter.map((original) => original.name));
-    expect(toTemplateRequest({ ...form, name: 'Copy' }).templateTabs).toEqual(starter);
-    expect(templateFormErrors({ ...form, name: 'Copy' }, ['Default'])).toEqual({});
+describe('moveComponent', () => {
+  /** `to.index` is the slot as the tab stands before the move — where a drop line is drawn. */
+  it('reorders within a tab', () => {
+    expect(types(moveComponent(TABS, { tab: 0, index: 0 }, { tab: 0, index: 3 })[0])).toEqual([
+      'attachments',
+      'batches',
+      'experimentDetails',
+    ]);
+    expect(types(moveComponent(TABS, { tab: 0, index: 2 }, { tab: 0, index: 0 })[0])).toEqual([
+      'batches',
+      'experimentDetails',
+      'attachments',
+    ]);
+    // Dropped on either side of itself: nowhere to go.
+    expect(moveComponent(TABS, { tab: 0, index: 1 }, { tab: 0, index: 2 })).toEqual(TABS);
   });
 
-  it('falls back to one "Tab 1" with nothing ticked, as the Angular app began', () => {
-    expect(startingTemplateForm(undefined).tabs).toEqual([{ ...EMPTY_TEMPLATE_TAB, name: 'Tab 1' }]);
+  it('moves into another tab', () => {
+    const moved = moveComponent(TABS, { tab: 0, index: 1 }, { tab: 1, index: 0 });
+    expect(types(moved[0])).toEqual(['experimentDetails', 'batches']);
+    expect(types(moved[1])).toEqual(['attachments', 'versionHistory']);
+  });
+
+  it('refuses a move into a tab that already holds the component', () => {
+    const tabs = addComponent(TABS, 1, 'batches');
+    expect(moveComponent(tabs, { tab: 0, index: 2 }, { tab: 1, index: 0 })).toEqual(tabs);
   });
 });
 
-describe('toTemplateRequest', () => {
-  /** Only `stoichiometryTable` carries settings on the wire; the rest are a bare `type`. */
-  it('trims names and gives only the stoichiometry component its blocks', () => {
+describe('tabError', () => {
+  it('says why a tab cannot be saved', () => {
+    expect(tabError({ name: ' ', components: [{ type: 'batches' }] })).toBe('Tab Name is required');
+    expect(tabError({ name: 'Tab 1', components: [] })).toBe('Add at least one component');
     expect(
-      toTemplateRequest({
-        name: ' Synthesis ',
-        tabs: [
-          tab({
-            name: ' Reaction ',
-            components: ['experimentDetails', 'stoichiometryTable'],
-            stoichiometry: { reactionScheme: true, reactantsReagentsSolvents: true, intendedProducts: false },
-          }),
+      tabError({
+        name: 'Tab 1',
+        components: [
+          {
+            type: 'stoichiometryTable',
+            reactionScheme: false,
+            reactantsReagentsSolvents: false,
+            intendedProducts: false,
+          },
         ],
       }),
-    ).toEqual({
-      name: 'Synthesis',
-      templateTabs: [
-        {
-          name: 'Reaction',
-          components: [
-            { type: 'experimentDetails' },
-            {
-              type: 'stoichiometryTable',
-              reactionScheme: true,
-              reactantsReagentsSolvents: true,
-              intendedProducts: false,
-            },
-          ],
-        },
-      ],
-    });
+    ).toBe('Pick at least one part of the Stoichiometric Calculation');
+    expect(tabError(TABS[0])).toBeUndefined();
+  });
+});
+
+it('builds the POST body with names trimmed', () => {
+  expect(toTemplateRequest(' Synthesis ', [{ name: ' Reaction ', components: [{ type: 'batches' }] }])).toEqual({
+    name: 'Synthesis',
+    templateTabs: [{ name: 'Reaction', components: [{ type: 'batches' }] }],
   });
 });
