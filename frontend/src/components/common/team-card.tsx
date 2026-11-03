@@ -60,25 +60,20 @@ function CopyUsernameButton({ username }: { username: string }) {
 function MemberRow({
   member,
   canManage,
-  cascades,
   updating,
   onLevelChange,
   onRemove,
 }: {
   member: ACLEntry;
   canManage: boolean;
-  /** Whether a removal here can take the member off everything below too (`deleteNested`). */
-  cascades: boolean;
   updating: boolean;
   onLevelChange: (level: AccessLevel) => void;
   onRemove: () => void;
 }) {
   // AUTHOR is the creator's own entry; the backend rejects any change to it.
   const locked = isImmutableLevel(member.level) || !canManage;
-  // Remove Member only for a member of this entity's own ACL: an inherited one stays on the
-  // parent's. A Limited View one has no entry of their own — the level comes from access below —
-  // so only a removal that cascades (`deleteNested`) takes them off, and only there is it offered.
-  const removable = !member.inherited && (!isDerivedLevel(member.level) || cascades);
+  // Remove Member only for a member of this entity's own ACL: an inherited one stays on the parent's.
+  const removable = !member.inherited;
 
   return (
     <li className={cn('grid items-center gap-x-2 py-2 text-[14px]/6', ROW_COLUMNS)}>
@@ -172,7 +167,9 @@ export function TeamMembers({
   const [removing, setRemoving] = useState<ACLEntry>();
   const [deleteNested, setDeleteNested] = useState(true);
   const suggestions = useUserSuggestions(inputValue);
-  const cascadeForced = removing !== undefined && isDerivedLevel(removing.level);
+  // Limited View comes from access below, so removing such a member only works with the cascade:
+  // the box stays ticked, as `onRemove` left it, and cannot be unticked.
+  const limitedView = removing !== undefined && isDerivedLevel(removing.level);
 
   // Already-members are dropped from the list rather than shown and rejected on submit.
   const members = new Set(acl.map((entry) => entry.username));
@@ -234,7 +231,6 @@ export function TeamMembers({
             key={member.username}
             member={member}
             canManage={canManage}
-            cascades={nestedRemovalLabel !== undefined}
             updating={updatingUsername === member.username}
             onLevelChange={(level) => changeLevel?.mutate([{ username: member.username, level }])}
             onRemove={() => {
@@ -257,7 +253,7 @@ export function TeamMembers({
             {
               username: removing!.username,
               level: 'NONE',
-              ...(nestedRemovalLabel && { deleteNested: deleteNested || cascadeForced }),
+              ...(nestedRemovalLabel && { deleteNested }),
             },
           ]);
           setRemoveOpen(false);
@@ -271,17 +267,13 @@ export function TeamMembers({
             <label
               className={cn(
                 'flex w-fit items-center gap-2 text-[14px]/6 text-neutral-1000',
-                !cascadeForced && 'cursor-pointer',
+                !limitedView && 'cursor-pointer',
               )}
             >
-              <Checkbox
-                checked={deleteNested || cascadeForced}
-                disabled={cascadeForced}
-                onCheckedChange={setDeleteNested}
-              />
+              <Checkbox checked={deleteNested} disabled={limitedView} onCheckedChange={setDeleteNested} />
               {nestedRemovalLabel}
             </label>
-            {cascadeForced && (
+            {limitedView && (
               <p className="pl-6 text-[12px]/5 text-neutral-700">
                 {removing.displayName} has Limited View because of access below, so that access goes too.
               </p>

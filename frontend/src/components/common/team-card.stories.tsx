@@ -45,13 +45,6 @@ function ProjectTeamCard({ acl, canManage }: { acl: ACLEntry[]; canManage: boole
   );
 }
 
-/** The same card with no cascade on removal, as an experiment's team has none below it. */
-function ExperimentLikeTeamCard({ acl }: { acl: ACLEntry[] }) {
-  const addMembers = useUpdateProjectAccess(PROJECT_ID);
-  const changeLevel = useUpdateProjectAccess(PROJECT_ID);
-  return <TeamCard acl={acl} canManage addMembers={addMembers} changeLevel={changeLevel} />;
-}
-
 /**
  * The access mutation updates the cached project rather than any local state — so a story
  * that passes `acl` as a fixed prop can never show the result of a change. The interactive
@@ -191,8 +184,8 @@ export const LimitedViewCanBePromoted: Story = {
 };
 
 /**
- * A Limited View member can be removed where removal cascades — their access *is* what is below,
- * so the "Also remove…" box is ticked and locked, and `deleteNested` always goes out.
+ * A Limited View member can be removed — their access *is* what is below, so the "Also remove…"
+ * box is ticked and locked, and `deleteNested` always goes out.
  */
 export const LimitedViewRemovalCascades: Story = {
   parameters: { msw: { handlers: spyHandlers } },
@@ -210,19 +203,6 @@ export const LimitedViewRemovalCascades: Story = {
     await userEvent.click(screen.getByRole('button', { name: 'Remove' }));
 
     await waitFor(() => expect(sent).toEqual([[{ username: 'anna.petrova', level: 'NONE', deleteNested: true }]]));
-  },
-};
-
-/** Without a cascade — an experiment's team — there is no removing a Limited View member. */
-export const LimitedViewWithoutCascade: Story = {
-  args: {
-    acl: [makeAclEntry('Administrator', { level: 'AUTHOR' }), makeAclEntry('Anna Petrova', { level: 'IMPLICIT_VIEW' })],
-  },
-  render: (args) => <ExperimentLikeTeamCard acl={args.acl} />,
-  play: async ({ canvasElement }) => {
-    await userEvent.click(await within(canvasElement).findByRole('button', { name: /Limited View/ }));
-    await expect(await screen.findByRole('menuitem', { name: 'Admin' })).toBeInTheDocument();
-    await expect(screen.queryByRole('menuitem', { name: 'Remove Member' })).not.toBeInTheDocument();
   },
 };
 
