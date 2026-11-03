@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Copy, UserPlus } from 'lucide-react';
+import { Check, ChevronDown, Copy, UserMinus, UserPlus } from 'lucide-react';
 import { useState } from 'react';
 
 import { FormDialog } from '@/components/common/form-dialog';
@@ -6,12 +6,12 @@ import { MultiCombobox } from '@/components/ui/combobox';
 import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Menu, MenuContent, MenuItem, MenuTrigger } from '@/components/ui/menu';
+import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from '@/components/ui/menu';
 import { useUserSuggestions } from '@/lib/api/user';
 import { cn } from '@/lib/utils';
 import type { UseMutationResult } from '@tanstack/react-query';
 import type { AccessForm, AccessLevel, ACLEntry, UserRef } from '@/lib/types/common.ts';
-import { ACL_LEVEL_LABELS, ELIGIBLE_ACL_LEVELS, isImmutableLevel } from '@/lib/types/common.ts';
+import { ACL_LEVEL_LABELS, ELIGIBLE_ACL_LEVELS, isDerivedLevel, isImmutableLevel } from '@/lib/types/common.ts';
 
 /** What a newly added member gets. Anything more is a deliberate step up in the level menu. */
 const DEFAULT_LEVEL: AccessLevel = 'VIEW';
@@ -62,14 +62,18 @@ function MemberRow({
   canManage,
   updating,
   onLevelChange,
+  onRemove,
 }: {
   member: ACLEntry;
   canManage: boolean;
   updating: boolean;
   onLevelChange: (level: AccessLevel) => void;
+  onRemove: () => void;
 }) {
   // AUTHOR is the creator's own entry; the backend rejects any change to it.
   const locked = isImmutableLevel(member.level) || !canManage;
+  // Remove Member only for a member of this entity's own ACL: an inherited one stays on the parent's.
+  const removable = !member.inherited;
 
   return (
     <li className={cn('grid items-center gap-x-2 py-2 text-[14px]/6', ROW_COLUMNS)}>
@@ -108,6 +112,15 @@ function MemberRow({
                 {ACL_LEVEL_LABELS[level]}
               </MenuItem>
             ))}
+            {removable && (
+              <>
+                <MenuSeparator />
+                <MenuItem className="text-destructive" onClick={onRemove}>
+                  <UserMinus className="size-4" />
+                  Remove Member
+                </MenuItem>
+              </>
+            )}
           </MenuContent>
         </Menu>
       )}
@@ -116,8 +129,8 @@ function MemberRow({
 }
 
 /**
- * The members of a project, notebook or experiment, with the controls to add one and to
- * re-level an existing one — the card's contents without its frame, so the Team sheet can show
+ * The members of a project, notebook or experiment, with the controls to add one, to re-level
+ * one and to remove one — the card's contents without its frame, so the Team sheet can show
  * the same list under its own title instead of a card nested in a card.
  *
  * The two mutations arrive as props rather than being made here: they post to different
@@ -129,8 +142,10 @@ function MemberRow({
  * every level renders as locked text. A read-only surface should not have to invent a mutation
  * it will never fire.
  *
- * Picking None asks first. `nestedRemovalLabel` is for a project or notebook: it adds a checkbox,
- * ticked by default, that sends `deleteNested` so the member also goes from everything below.
+ * Remove Member asks first. `nestedRemovalLabel` is for a project or notebook: it adds a checkbox,
+ * ticked by default, that sends `deleteNested` so the member also goes from everything below. For
+ * a Limited View member the box is ticked and locked: their access *is* what is below, so removing
+ * them without the cascade would leave them exactly where they were.
  */
 export function TeamMembers({
   acl,
@@ -152,6 +167,9 @@ export function TeamMembers({
   const [removing, setRemoving] = useState<ACLEntry>();
   const [deleteNested, setDeleteNested] = useState(true);
   const suggestions = useUserSuggestions(inputValue);
+  // Limited View comes from access below, so removing such a member only works with the cascade:
+  // the box stays ticked, as `onRemove` left it, and cannot be unticked.
+  const limitedView = removing !== undefined && isDerivedLevel(removing.level);
 
   // Already-members are dropped from the list rather than shown and rejected on submit.
   const members = new Set(acl.map((entry) => entry.username));
@@ -214,14 +232,11 @@ export function TeamMembers({
             member={member}
             canManage={canManage}
             updating={updatingUsername === member.username}
-            onLevelChange={(level) => {
-              if (level === 'NONE') {
-                setRemoving(member);
-                setDeleteNested(true);
-                setRemoveOpen(true);
-              } else {
-                changeLevel?.mutate([{ username: member.username, level }]);
-              }
+            onLevelChange={(level) => changeLevel?.mutate([{ username: member.username, level }])}
+            onRemove={() => {
+              setRemoving(member);
+              setDeleteNested(true);
+              setRemoveOpen(true);
             }}
           />
         ))}
@@ -235,7 +250,11 @@ export function TeamMembers({
         submitVariant="destructive"
         onSubmit={async () => {
           await changeLevel?.mutateAsync([
-            { username: removing!.username, level: 'NONE', ...(nestedRemovalLabel && { deleteNested }) },
+            {
+              username: removing!.username,
+              level: 'NONE',
+              ...(nestedRemovalLabel && { deleteNested }),
+            },
           ]);
           setRemoveOpen(false);
         }}
@@ -244,10 +263,22 @@ export function TeamMembers({
           Are you sure you want to remove {removing?.displayName} from the team?
         </p>
         {nestedRemovalLabel && (
-          <label className="flex w-fit cursor-pointer items-center gap-2 text-[14px]/6 text-neutral-1000">
-            <Checkbox checked={deleteNested} onCheckedChange={setDeleteNested} />
-            {nestedRemovalLabel}
-          </label>
+          <div className="flex flex-col gap-1">
+            <label
+              className={cn(
+                'flex w-fit items-center gap-2 text-[14px]/6 text-neutral-1000',
+                !limitedView && 'cursor-pointer',
+              )}
+            >
+              <Checkbox checked={deleteNested} disabled={limitedView} onCheckedChange={setDeleteNested} />
+              {nestedRemovalLabel}
+            </label>
+            {limitedView && (
+              <p className="pl-6 text-[12px]/5 text-neutral-700">
+                {removing.displayName} has Limited View because of access below, so that access goes too.
+              </p>
+            )}
+          </div>
         )}
       </FormDialog>
     </>
