@@ -1,5 +1,6 @@
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { InfiniteData } from '@tanstack/react-query';
+import { useCallback } from 'react';
 
 import { apiFetch } from '@/lib/api';
 import { getNextPageParam } from '@/lib/api/collections';
@@ -50,6 +51,23 @@ export function useSampleSearch(request: FindSamplesRequest) {
 }
 
 /**
+ * Marks a search's cached answer stale, for a Search pressed on a request that has not changed.
+ * Moving the key is what refetches everywhere else, and an unchanged key moves nothing — so
+ * without this a My Materials search re-run after an unmark keeps answering from the patched
+ * cache, still listing the material that was just removed (#802). A request that is not cached
+ * yet is unaffected; one cached but not shown is refetched as soon as it is.
+ */
+export function useInvalidateSampleSearch() {
+  const queryClient = useQueryClient();
+
+  return useCallback(
+    (request: FindSamplesRequest) =>
+      queryClient.invalidateQueries({ queryKey: sampleKeys.search(request), exact: true }),
+    [queryClient],
+  );
+}
+
+/**
  * Adds a sample to, or removes it from, the signed-in user's My Materials list. The whole
  * `SampleDTO` is the body: the backend keys the mark on `source` + `sampleKey` and imports the
  * compound from `catalog`.
@@ -62,7 +80,8 @@ export function useSampleSearch(request: FindSamplesRequest) {
  * vanish from under the pointer.
  *
  * Only the flag is copied, not the row: the same sample shows in its own catalog's tab and in My
- * Materials, and each tab keeps the record its own catalog answered with.
+ * Materials, and each tab keeps the record its own catalog answered with. The unmarked row goes
+ * once the search is run again — see `useInvalidateSampleSearch`.
  */
 export function useMarkSample() {
   const queryClient = useQueryClient();

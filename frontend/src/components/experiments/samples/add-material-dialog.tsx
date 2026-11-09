@@ -17,6 +17,7 @@ import { STRUCTURE_TYPE_LABELS } from '@/lib/types/search.ts';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogClose, DialogContent } from '@/components/ui/dialog';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { useInvalidateSampleSearch } from '@/lib/api/samples';
 import { useAddMaterial } from '@/lib/hooks/experiments/use-add-material';
 import { prewarmKetcher } from '@/lib/ketcher';
 import { getAllInputSampleKeys } from '@/lib/reactions';
@@ -75,6 +76,7 @@ export function AddMaterialDialog({
   const [count, setCount] = useState<string | null>(null);
 
   const addMaterial = useAddMaterial(experiment, reaction);
+  const invalidateSearch = useInvalidateSampleSearch();
   const boundSamples = useMemo(() => getAllInputSampleKeys(reaction), [reaction]);
   // PubChem hits are drawn by Ketcher; start its ~1.3 s cold load before the first one is shown.
   useEffect(() => {
@@ -99,7 +101,11 @@ export function AddMaterialDialog({
 
   function handleSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
-    setSubmitted(toFindSamplesRequest(values));
+    const request = toFindSamplesRequest(values);
+    // Pressing Search is a question, so it is always asked: the same request again would
+    // otherwise be answered from the cache — after an unmark, a stale My Materials list (#802).
+    void invalidateSearch(request);
+    setSubmitted(request);
     // Collapsing hands the space back to the results and leaves the summary as the record of
     // what was searched for.
     setAdvancedOpen(false);

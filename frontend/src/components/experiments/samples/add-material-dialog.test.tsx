@@ -171,6 +171,32 @@ describe('AddMaterialDialog', () => {
   });
 
   /**
+   * #802. Unmarking only patches the cached row, so it stays under the pointer — but pressing
+   * Search again with the same request has to ask the backend, or the removed material is still
+   * "found" in My Materials.
+   */
+  it('asks again when the same search is pressed again', async () => {
+    const marked = { ...SAMPLE_RESULTS[0], marked: true };
+    apiFetch.mockImplementation((path: string, init?: { json?: SampleDTO }) => {
+      if (path === SEARCH_PATH) {
+        const searches = apiFetch.mock.calls.filter(([requested]) => requested === SEARCH_PATH).length;
+        return Promise.resolve(searchResult(searches === 1 ? [marked] : []));
+      }
+      if (path === '/api/eln/samples/unmark') return Promise.resolve({ ...init?.json, marked: false });
+      return Promise.resolve('<svg />');
+    });
+    renderDialog();
+    await userEvent.click(screen.getByRole('radio', { name: 'My Materials' }));
+    await search();
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove Acetylsalicylic acid from My Materials' }));
+    await screen.findByRole('button', { name: 'Add Acetylsalicylic acid to My Materials' });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Search' }));
+
+    await waitFor(() => expect(screen.queryByText('Acetylsalicylic acid')).not.toBeInTheDocument());
+  });
+
+  /**
    * The sheet is mounted for the life of the page — that is what lets it slide out — so a reset
    * on close is the only thing between a visit and the last one's search. It runs on
    * `onOpenChangeComplete`, after the exit transition, which jsdom finishes immediately.
