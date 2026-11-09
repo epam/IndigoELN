@@ -42,10 +42,12 @@ import type { StructuralSearchType } from '@/lib/types/search.ts';
  * particular to it:
  *
  * - **Nothing is searched until Search is pressed.** Analyze RXN has a structure to search for
- *   the moment it opens; this has an empty form, and every keystroke is not a question.
+ *   the moment it opens; this has an empty form, and every keystroke is not a question. The one
+ *   exception is choosing My Materials, which lists the saved materials at once.
  * - **Search needs a criterion.** The backend would take a request carrying only a catalog, but
  *   a whole catalog answers nothing that was asked, so `isEmpty` holds the button until there is
- *   a term, a structure or a filter that will actually be sent.
+ *   a term, a structure or a filter that will actually be sent. My Materials is exempt: the
+ *   user's own list is worth seeing whole.
  * - **The catalog gates the form.** See `add-material-form.ts`: PubChem disables all but
  *   Molecular Formula, and those filters are dropped from the request.
  *
@@ -99,14 +101,25 @@ export function AddMaterialDialog({
     patch({ structure: next?.structure ?? null });
   }
 
-  function handleSubmit(event: SubmitEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const request = toFindSamplesRequest(values);
+  function search(next: AddMaterialFormValues) {
+    const request = toFindSamplesRequest(next);
     void resetSearch(request);
     setSubmitted(request);
+  }
+
+  function handleSubmit(event: SubmitEvent<HTMLFormElement>) {
+    event.preventDefault();
+    search(values);
     // Collapsing hands the space back to the results and leaves the summary as the record of
     // what was searched for.
     setAdvancedOpen(false);
+  }
+
+  /** Choosing My Materials lists what was saved straight away, without waiting for Search. */
+  function handleCatalogChange(catalog: SearchCatalog) {
+    const next = { ...values, catalog };
+    setValues(next);
+    if (catalog === 'MY_MATERIALS') search(next);
   }
 
   function clearAll() {
@@ -153,7 +166,7 @@ export function AddMaterialDialog({
 
           <RadioGroup
             value={values.catalog}
-            onValueChange={(next) => patch({ catalog: next as SearchCatalog })}
+            onValueChange={(next) => handleCatalogChange(next as SearchCatalog)}
             aria-label="Catalog to search"
             className="flex w-auto flex-wrap items-center gap-6"
           >
@@ -206,8 +219,8 @@ export function AddMaterialDialog({
             <Button type="button" variant="secondary" size="lg" onClick={clearAll}>
               Clear All
             </Button>
-            {/* A catalog on its own asks nothing; see `isEmpty` for why a filter the catalog
-                has disabled does not count as a criterion either. */}
+            {/* A catalog on its own asks nothing, My Materials aside; see `isEmpty` for why a
+                filter the catalog has disabled does not count as a criterion either. */}
             <Button
               type="submit"
               size="lg"

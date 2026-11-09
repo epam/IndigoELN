@@ -122,6 +122,16 @@ describe('AddMaterialDialog', () => {
     expect(screen.getByRole('button', { name: 'Search' })).toBeDisabled();
   });
 
+  /** #801. Choosing My Materials lists what was saved, without a criterion or a Search press. */
+  it('lists My Materials as soon as the catalog is chosen', async () => {
+    renderDialog();
+    await userEvent.click(screen.getByRole('radio', { name: 'My Materials' }));
+
+    expect(await screen.findByText('Acetylsalicylic acid')).toBeInTheDocument();
+    expect(bodyOf(SEARCH_PATH)).toEqual({ catalog: 'MY_MATERIALS' });
+    expect(screen.getByRole('button', { name: 'Search' })).toBeEnabled();
+  });
+
   it('carries an advanced filter once a catalog that supports it is chosen', async () => {
     renderDialog();
     await userEvent.click(screen.getByRole('radio', { name: 'My Materials' }));
@@ -186,7 +196,6 @@ describe('AddMaterialDialog', () => {
     });
     renderDialog();
     await userEvent.click(screen.getByRole('radio', { name: 'My Materials' }));
-    await search();
     await userEvent.click(await screen.findByRole('button', { name: 'Remove Acetylsalicylic acid from My Materials' }));
     await screen.findByRole('button', { name: 'Add Acetylsalicylic acid to My Materials' });
 
