@@ -465,7 +465,8 @@ the values, the request, the summary. Three things are particular to it:
   (`useResetSampleSearch`) before submitting it, because an unchanged request is an unchanged
   key and would otherwise be answered from the cache — which, after an unmark, still lists the
   removed material in My Materials (#802). `useMarkSample` likewise drops every cached My
-  Materials search not on screen, so Analyze RXN's catalog radio cannot bring an old list back.
+  Materials search not on screen and marks the ones on screen stale, so Analyze RXN's catalog
+  radio cannot bring an old list back.
 - **The catalog gates the form.** PubChem disables every filter but Molecular Formula, which its
   API does accept, and `toFindSamplesRequest` **drops** the disabled ones rather than sending them
   (the backend would 400) — a request has to say what was actually searched for. Values survive

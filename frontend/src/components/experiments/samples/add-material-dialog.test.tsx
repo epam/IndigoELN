@@ -3,10 +3,9 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { makeExperimentDetails, SAMPLE_RESULTS } from '@/mocks/fixtures';
+import { makeExperimentDetails, makeSamplePage, SAMPLE_RESULTS } from '@/mocks/fixtures';
 
 import type { ReactNode } from 'react';
-import type { Page } from '@/lib/types/common.ts';
 import type { SampleDTO } from '@/lib/types/samples.ts';
 
 vi.mock('@/lib/auth', () => ({
@@ -36,13 +35,14 @@ const REACTION = EXPERIMENT.model.reactions[0];
 const SEARCH_PATH = '/api/eln/samples/search?pageNo=0&pageSize=100';
 const MUTATE_PATH = `/api/eln/experiments/${EXPERIMENT.id}/mutate?revision=${EXPERIMENT.revision}`;
 
-function searchResult(items = SAMPLE_RESULTS): Page<SampleDTO> {
-  return { pageNo: 0, pageSize: 100, totalItems: items.length, totalPages: 1, hasMore: false, items };
+/** Every call to a path, oldest first. */
+function callsTo(path: string) {
+  return apiFetch.mock.calls.filter(([requested]) => requested === path);
 }
 
 /** The last JSON payload sent to a path — `apiFetch` serialises it, so this is the object. */
 function bodyOf(path: string): unknown {
-  const call = [...apiFetch.mock.calls].reverse().find(([requested]) => requested === path);
+  const call = callsTo(path).at(-1);
   return call == null ? undefined : call[1].json;
 }
 
@@ -66,7 +66,7 @@ async function search(term = 'aspirin') {
 beforeEach(() => {
   apiFetch.mockReset();
   apiFetch.mockImplementation((path: string) => {
-    if (path.startsWith('/api/eln/samples/search')) return Promise.resolve(searchResult());
+    if (path.startsWith('/api/eln/samples/search')) return Promise.resolve(makeSamplePage());
     if (path.includes('/mutate')) return Promise.resolve({ patch: {} });
     if (path.startsWith('/api/eln/dictionaries/')) return Promise.resolve([]);
     // The structure previews; no row is expanded, so nothing should ask.
@@ -179,8 +179,7 @@ describe('AddMaterialDialog', () => {
     const marked = { ...SAMPLE_RESULTS[0], marked: true };
     apiFetch.mockImplementation((path: string, init?: { json?: SampleDTO }) => {
       if (path === SEARCH_PATH) {
-        const searches = apiFetch.mock.calls.filter(([requested]) => requested === SEARCH_PATH).length;
-        return Promise.resolve(searchResult(searches === 1 ? [marked] : []));
+        return Promise.resolve(makeSamplePage(callsTo(SEARCH_PATH).length === 1 ? [marked] : []));
       }
       if (path === '/api/eln/samples/unmark') return Promise.resolve({ ...init?.json, marked: false });
       return Promise.resolve('<svg />');
@@ -193,7 +192,7 @@ describe('AddMaterialDialog', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Search' }));
 
-    expect(apiFetch.mock.calls.filter(([requested]) => requested === SEARCH_PATH)).toHaveLength(2);
+    expect(callsTo(SEARCH_PATH)).toHaveLength(2);
     await waitFor(() => expect(screen.queryByText('Acetylsalicylic acid')).not.toBeInTheDocument());
   });
 

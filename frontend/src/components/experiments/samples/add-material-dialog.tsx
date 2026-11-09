@@ -102,8 +102,6 @@ export function AddMaterialDialog({
   function handleSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const request = toFindSamplesRequest(values);
-    // Pressing Search is a question, so it is always asked: the same request again would
-    // otherwise be answered from the cache — after an unmark, a stale My Materials list (#802).
     void resetSearch(request);
     setSubmitted(request);
     // Collapsing hands the space back to the results and leaves the summary as the record of
