@@ -193,6 +193,7 @@ describe('AddMaterialDialog', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Search' }));
 
+    expect(apiFetch.mock.calls.filter(([requested]) => requested === SEARCH_PATH)).toHaveLength(2);
     await waitFor(() => expect(screen.queryByText('Acetylsalicylic acid')).not.toBeInTheDocument());
   });
 

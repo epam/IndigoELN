@@ -51,18 +51,20 @@ export function useSampleSearch(request: FindSamplesRequest) {
 }
 
 /**
- * Marks a search's cached answer stale, for a Search pressed on a request that has not changed.
- * Moving the key is what refetches everywhere else, and an unchanged key moves nothing — so
- * without this a My Materials search re-run after an unmark keeps answering from the patched
- * cache, still listing the material that was just removed (#802). A request that is not cached
- * yet is unaffected; one cached but not shown is refetched as soon as it is.
+ * Drops a search's cached answer, for a Search pressed on a request that has not changed. Moving
+ * the key is what refetches everywhere else, and an unchanged key moves nothing — so without this
+ * a My Materials search re-run after an unmark keeps answering from the patched cache, still
+ * listing the material that was just removed (#802).
+ *
+ * A reset rather than an invalidation: the table goes back to its skeletons instead of leaving the
+ * old answer up, unannounced, until the new one lands, and only page 0 is asked for again rather
+ * than every page scrolled through.
  */
-export function useInvalidateSampleSearch() {
+export function useResetSampleSearch() {
   const queryClient = useQueryClient();
 
   return useCallback(
-    (request: FindSamplesRequest) =>
-      queryClient.invalidateQueries({ queryKey: sampleKeys.search(request), exact: true }),
+    (request: FindSamplesRequest) => queryClient.resetQueries({ queryKey: sampleKeys.search(request), exact: true }),
     [queryClient],
   );
 }
@@ -80,8 +82,13 @@ export function useInvalidateSampleSearch() {
  * vanish from under the pointer.
  *
  * Only the flag is copied, not the row: the same sample shows in its own catalog's tab and in My
- * Materials, and each tab keeps the record its own catalog answered with. The unmarked row goes
- * once the search is run again — see `useInvalidateSampleSearch`.
+ * Materials, and each tab keeps the record its own catalog answered with.
+ *
+ * The patch only covers rows already listed, though, and My Materials *is* the flag: a mark adds a
+ * row its cached searches lack, an unmark leaves one they should not have. So those searches are
+ * dropped — all but the ones on screen, which keep the row under the pointer until Search is pressed
+ * again (`useResetSampleSearch`). Without that, switching catalogs and back within `staleTime`
+ * brought the old list back (#802).
  */
 export function useMarkSample() {
   const queryClient = useQueryClient();
@@ -100,6 +107,11 @@ export function useMarkSample() {
             items: page.items.map((item) => (sampleRowKey(item) === key ? { ...item, marked: updated.marked } : item)),
           })),
         };
+      });
+      queryClient.removeQueries({
+        queryKey: ['sampleSearch'],
+        predicate: (query) =>
+          (query.queryKey[1] as FindSamplesRequest).catalog === 'MY_MATERIALS' && query.getObserversCount() === 0,
       });
     },
   });
