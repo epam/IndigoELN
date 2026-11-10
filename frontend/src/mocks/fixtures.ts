@@ -1,4 +1,4 @@
-import type { ACLEntry, Attachment, UserRef } from '@/lib/types/common.ts';
+import type { ACLEntry, Attachment, Page, UserRef } from '@/lib/types/common.ts';
 import type { BuiltInDictionary, Dictionary, DictionaryItem, DictionaryItemRef } from '@/lib/types/dictionaries.ts';
 import type { GlobalSearchResult } from '@/lib/types/search.ts';
 import type { Experiment, ExperimentDetails, ExperimentRef, SignatureTemplateRef } from '@/lib/types/experiments.ts';
@@ -1197,6 +1197,11 @@ export const SAMPLE_RESULTS: SampleDTO[] = [
     inchi: 'InChI=1S/C7H8/c1-7-5-3-2-4-6-7/h2-6H,1H3',
   }),
 ];
+
+/** One page of `/samples/search` — the size the catalog sheets ask for, everything on it. */
+export function makeSamplePage(items: SampleDTO[] = SAMPLE_RESULTS): Page<SampleDTO> {
+  return { pageNo: 0, pageSize: 100, totalItems: items.length, totalPages: 1, hasMore: false, items };
+}
 
 /**
  * The signature service's blocks. `canSignOrReject` is the backend's own computation — it is true

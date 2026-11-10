@@ -3,10 +3,9 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { makeExperimentDetails, SAMPLE_RESULTS } from '@/mocks/fixtures';
+import { makeExperimentDetails, makeSamplePage, SAMPLE_RESULTS } from '@/mocks/fixtures';
 
 import type { ReactNode } from 'react';
-import type { Page } from '@/lib/types/common.ts';
 import type { SampleDTO } from '@/lib/types/samples.ts';
 
 vi.mock('@/lib/auth', () => ({
@@ -36,13 +35,14 @@ const REACTION = EXPERIMENT.model.reactions[0];
 const SEARCH_PATH = '/api/eln/samples/search?pageNo=0&pageSize=100';
 const MUTATE_PATH = `/api/eln/experiments/${EXPERIMENT.id}/mutate?revision=${EXPERIMENT.revision}`;
 
-function searchResult(items = SAMPLE_RESULTS): Page<SampleDTO> {
-  return { pageNo: 0, pageSize: 100, totalItems: items.length, totalPages: 1, hasMore: false, items };
+/** Every call to a path, oldest first. */
+function callsTo(path: string) {
+  return apiFetch.mock.calls.filter(([requested]) => requested === path);
 }
 
 /** The last JSON payload sent to a path — `apiFetch` serialises it, so this is the object. */
 function bodyOf(path: string): unknown {
-  const call = [...apiFetch.mock.calls].reverse().find(([requested]) => requested === path);
+  const call = callsTo(path).at(-1);
   return call == null ? undefined : call[1].json;
 }
 
@@ -66,7 +66,7 @@ async function search(term = 'aspirin') {
 beforeEach(() => {
   apiFetch.mockReset();
   apiFetch.mockImplementation((path: string) => {
-    if (path.startsWith('/api/eln/samples/search')) return Promise.resolve(searchResult());
+    if (path.startsWith('/api/eln/samples/search')) return Promise.resolve(makeSamplePage());
     if (path.includes('/mutate')) return Promise.resolve({ patch: {} });
     if (path.startsWith('/api/eln/dictionaries/')) return Promise.resolve([]);
     // The structure previews; no row is expanded, so nothing should ask.
@@ -122,6 +122,16 @@ describe('AddMaterialDialog', () => {
     expect(screen.getByRole('button', { name: 'Search' })).toBeDisabled();
   });
 
+  /** #801. Choosing My Materials lists what was saved, without a criterion or a Search press. */
+  it('lists My Materials as soon as the catalog is chosen', async () => {
+    renderDialog();
+    await userEvent.click(screen.getByRole('radio', { name: 'My Materials' }));
+
+    expect(await screen.findByText('Acetylsalicylic acid')).toBeInTheDocument();
+    expect(bodyOf(SEARCH_PATH)).toEqual({ catalog: 'MY_MATERIALS' });
+    expect(screen.getByRole('button', { name: 'Search' })).toBeEnabled();
+  });
+
   it('carries an advanced filter once a catalog that supports it is chosen', async () => {
     renderDialog();
     await userEvent.click(screen.getByRole('radio', { name: 'My Materials' }));
@@ -168,6 +178,31 @@ describe('AddMaterialDialog', () => {
         createdSampleAnchor: expect.any(String),
       }),
     );
+  });
+
+  /**
+   * #802. Unmarking only patches the cached row, so it stays under the pointer — but pressing
+   * Search again with the same request has to ask the backend, or the removed material is still
+   * "found" in My Materials.
+   */
+  it('asks again when the same search is pressed again', async () => {
+    const marked = { ...SAMPLE_RESULTS[0], marked: true };
+    apiFetch.mockImplementation((path: string, init?: { json?: SampleDTO }) => {
+      if (path === SEARCH_PATH) {
+        return Promise.resolve(makeSamplePage(callsTo(SEARCH_PATH).length === 1 ? [marked] : []));
+      }
+      if (path === '/api/eln/samples/unmark') return Promise.resolve({ ...init?.json, marked: false });
+      return Promise.resolve('<svg />');
+    });
+    renderDialog();
+    await userEvent.click(screen.getByRole('radio', { name: 'My Materials' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove Acetylsalicylic acid from My Materials' }));
+    await screen.findByRole('button', { name: 'Add Acetylsalicylic acid to My Materials' });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Search' }));
+
+    expect(callsTo(SEARCH_PATH)).toHaveLength(2);
+    await waitFor(() => expect(screen.queryByText('Acetylsalicylic acid')).not.toBeInTheDocument());
   });
 
   /**
