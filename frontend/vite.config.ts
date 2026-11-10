@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import {availableParallelism} from 'node:os';
+import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {storybookTest} from '@storybook/addon-vitest/vitest-plugin';
 import tailwindcss from '@tailwindcss/vite';
@@ -114,6 +115,95 @@ function cspHashes(): PluginOption {
   };
 }
 
+type NoticePackage = {
+  name: string;
+  version: string;
+  license: string;
+  author?: string;
+  homepage?: string;
+  dir: string;
+};
+
+const LICENSE_FILE = /^(licen[cs]e|copying|notice)/i;
+
+/** The package a bundled file belongs to: the nearest package.json with a name and a version. */
+function packageOf(file: string): NoticePackage | undefined {
+  const id = file.replace(/^\0/, '').split('?')[0];
+  if (!id.includes(`${path.sep}node_modules${path.sep}`)) return undefined;
+  for (let dir = path.dirname(path.resolve(id)); path.basename(dir) !== 'node_modules'; dir = path.dirname(dir)) {
+    const manifest = path.join(dir, 'package.json');
+    if (!fs.existsSync(manifest)) continue;
+    // Nested package.json files (e.g. dist/esm/package.json holding only "type") are not the package.
+    const pkg = JSON.parse(fs.readFileSync(manifest, 'utf8'));
+    if (!pkg.name || !pkg.version) continue;
+    const license =
+      typeof pkg.license === 'string'
+        ? pkg.license
+        : (pkg.license?.type ?? pkg.licenses?.map((l: { type: string }) => l.type).join(' OR ') ?? 'UNKNOWN');
+    const author = typeof pkg.author === 'string' ? pkg.author : pkg.author?.name;
+    return { name: pkg.name, version: pkg.version, license, author, homepage: pkg.homepage, dir };
+  }
+  return undefined;
+}
+
+/**
+ * Emits THIRD-PARTY-NOTICES.txt: every npm package with code or assets in the bundle, with the
+ * license and notice files it ships. The bundle is distributed (Docker image, S3/CloudFront), so
+ * its notices travel with it. Built from what Rollup actually bundled rather than from the
+ * dependency list: that catches packages pulled in by resolution alone (`paper`'s optional
+ * `require('acorn')` resolves to a copy no production dependency declares) and leaves out
+ * declared dependencies that never reach the bundle.
+ */
+function thirdPartyNotices(): PluginOption {
+  return {
+    name: 'third-party-notices',
+    apply: 'build',
+    generateBundle(_options, bundle) {
+      const files = Object.values(bundle).flatMap((output) =>
+        output.type === 'chunk' ? output.moduleIds : output.originalFileNames,
+      );
+      const packages = new Map<string, NoticePackage>();
+      for (const file of files) {
+        const pkg = packageOf(file);
+        if (pkg) packages.set(`${pkg.name}@${pkg.version}`, pkg);
+      }
+      const sections = [...packages.values()]
+        .sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version))
+        .map((pkg) => {
+          const header = [
+            `${pkg.name}@${pkg.version}`,
+            `License: ${pkg.license}`,
+            pkg.author && `Author: ${pkg.author}`,
+            pkg.homepage && `Homepage: ${pkg.homepage}`,
+          ].filter(Boolean);
+          const texts = fs
+            .readdirSync(pkg.dir)
+            .filter((file) => LICENSE_FILE.test(file))
+            .sort()
+            .map((file) => `--- ${file}\n\n${fs.readFileSync(path.join(pkg.dir, file), 'utf8').trim()}`);
+          return [...header, '', ...texts].join('\n').trim();
+        });
+      const intro = [
+        'Third-party software in the Indigo ELN web application',
+        '======================================================',
+        '',
+        `The application bundle includes the ${packages.size} packages listed below, with the license`,
+        'and notice files each of them ships. Where a package ships no license file, the standard text',
+        'of its license appears with another package under the same license in this file.',
+        '',
+        'The Docker image serves this bundle from the unmodified nginx:alpine base image, whose packages',
+        'carry their own licenses; their source code is available from',
+        'https://gitlab.alpinelinux.org/alpine/aports and https://github.com/nginx/docker-nginx.',
+      ].join('\n');
+      this.emitFile({
+        type: 'asset',
+        fileName: 'THIRD-PARTY-NOTICES.txt',
+        source: [intro, ...sections].join(`\n\n${'-'.repeat(80)}\n\n`) + '\n',
+      });
+    },
+  };
+}
+
 // Read once at startup: `vite preview` runs after the build, so the file is already there.
 // A rebuild while preview is running will not refresh this — restart preview.
 function contentSecurityPolicy(): string {
@@ -133,6 +223,7 @@ export default defineConfig({
     react(),
     tailwindcss(),
     cspHashes(),
+    thirdPartyNotices(),
   ],
   resolve: {
     alias: {

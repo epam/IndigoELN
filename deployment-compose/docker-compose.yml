@@ -150,9 +150,7 @@ services:
   #      - "10021:5005"
 
   keycloak:
-    build:
-      context: ./keycloak
-      dockerfile: Dockerfile
+    image: keycloak/keycloak:26.5.6
     command: start-dev --health-enabled=true --log-level=ERROR 
     environment:
       KC_DB: postgres
@@ -165,6 +163,7 @@ services:
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
       KC_HTTP_MANAGEMENT_PORT: 9005
       KC_HTTP_MANAGEMENT_HEALTH_ENABLED: true
+      KC_METRICS_ENABLED: true
     depends_on:
       postgres:
         condition: service_healthy
