@@ -129,7 +129,8 @@ const LICENSE_FILE = /^(licen[cs]e|copying|notice)/i;
 /** The package a bundled file belongs to: the nearest package.json with a name and a version. */
 function packageOf(file: string): NoticePackage | undefined {
   const id = file.replace(/^\0/, '').split('?')[0];
-  if (!id.includes(`${path.sep}node_modules${path.sep}`)) return undefined;
+  // Rollup ids use `/` on every platform, Windows included.
+  if (!/[\\/]node_modules[\\/]/.test(id)) return undefined;
   for (let dir = path.dirname(path.resolve(id)); path.basename(dir) !== 'node_modules'; dir = path.dirname(dir)) {
     const manifest = path.join(dir, 'package.json');
     if (!fs.existsSync(manifest)) continue;
@@ -177,8 +178,9 @@ function thirdPartyNotices(): PluginOption {
             pkg.homepage && `Homepage: ${pkg.homepage}`,
           ].filter(Boolean);
           const texts = fs
-            .readdirSync(pkg.dir)
-            .filter((file) => LICENSE_FILE.test(file))
+            .readdirSync(pkg.dir, { withFileTypes: true })
+            .filter((entry) => entry.isFile() && LICENSE_FILE.test(entry.name))
+            .map((entry) => entry.name)
             .sort()
             .map((file) => `--- ${file}\n\n${fs.readFileSync(path.join(pkg.dir, file), 'utf8').trim()}`);
           return [...header, '', ...texts].join('\n').trim();

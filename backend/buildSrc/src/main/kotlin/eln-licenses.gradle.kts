@@ -54,6 +54,9 @@ tasks.named("generateLicenseReport") {
     }
 }
 
-tasks.named("assemble") {
-    dependsOn("generateLicenseReport")
+// quarkusBuild, not assemble: deployment-compose/deploy.sh runs quarkusBuild alone before `docker build`.
+plugins.withId("io.quarkus") {
+    tasks.named("quarkusBuild") {
+        dependsOn("generateLicenseReport")
+    }
 }
