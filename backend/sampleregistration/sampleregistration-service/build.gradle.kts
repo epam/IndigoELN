@@ -1,6 +1,7 @@
 plugins {
     java
     `eln-conventions`
+    `eln-licenses`
     id("io.quarkus")
 }
 

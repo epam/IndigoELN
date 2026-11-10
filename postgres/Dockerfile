@@ -17,6 +17,21 @@ COPY --from=builder /build/bingo-postgres/lib/libbingo-postgres.so /usr/local/li
 COPY --from=builder /build/bingo-postgres/bingo_install.sql /docker-entrypoint-initdb.d/00_bingo_install.sql
 COPY init.sql /docker-entrypoint-initdb.d/10_create_extensions.sql
 
+# Third-party notice for the bingo extension, which ships no license file of its own.
+RUN mkdir -p /licenses/bingo && \
+    cp /usr/share/common-licenses/Apache-2.0 /licenses/bingo/LICENSE && \
+    printf '%s\n' \
+      'Third-party software in this image' \
+      '' \
+      'Bingo PostgreSQL cartridge 1.46.0 (/usr/local/lib/postgresql/libbingo-postgres.so)' \
+      'Copyright EPAM Systems. Licensed under the Apache License 2.0, see bingo/LICENSE.' \
+      'Source: https://github.com/epam/Indigo' \
+      '' \
+      'Base image: postgres:17.9 (Debian), used unmodified. Its packages carry their own' \
+      'licenses under /usr/share/doc/*/copyright; source code is available from' \
+      'https://sources.debian.org and https://github.com/docker-library/postgres.' \
+      > /licenses/README.txt
+
 RUN echo "shared_preload_libraries = 'pg_stat_statements'" >> /usr/share/postgresql/postgresql.conf.sample && \
     echo "pg_stat_statements.track = all" >> /usr/share/postgresql/postgresql.conf.sample && \
     echo "pg_stat_statements.max = 10000" >> /usr/share/postgresql/postgresql.conf.sample

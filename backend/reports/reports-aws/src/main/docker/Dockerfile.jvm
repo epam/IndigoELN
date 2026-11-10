@@ -6,6 +6,9 @@ COPY --chown=185 build/quarkus-app/lib/ /deployments/lib/
 COPY --chown=185 build/quarkus-app/*.jar /deployments/
 COPY --chown=185 build/quarkus-app/app/ /deployments/app/
 COPY --chown=185 build/quarkus-app/quarkus/ /deployments/quarkus/
+COPY --chown=185 build/licenses/ /licenses/
+# LGPL-3.0 (JasperReports) must be accompanied by the GPL-3.0 text; the base image has it.
+RUN cp /usr/share/licenses/grep/COPYING /licenses/GPL-3.0.txt
 
 EXPOSE 8080
 USER 185
