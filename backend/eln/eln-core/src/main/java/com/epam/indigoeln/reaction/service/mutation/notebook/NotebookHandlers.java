@@ -1,9 +1,11 @@
 package com.epam.indigoeln.reaction.service.mutation.notebook;
 
+import com.epam.indigoeln.common.exception.InvalidRequestException;
 import com.epam.indigoeln.eln.entity.ExperimentEntity;
 import com.epam.indigoeln.eln.entity.NotebookAttachment;
 import com.epam.indigoeln.eln.entity.NotebookEntity;
 import com.epam.indigoeln.eln.model.ApplicationPermission;
+import com.epam.indigoeln.eln.model.ExperimentStatus;
 import com.epam.indigoeln.eln.repository.ExperimentRepository;
 import com.epam.indigoeln.eln.repository.NotebookAttachmentRepository;
 import com.epam.indigoeln.eln.repository.ProjectRepository;
@@ -16,8 +18,13 @@ import com.epam.indigoeln.reaction.service.mutation.MutationHandlerFor;
 import jakarta.enterprise.context.Dependent;
 import jakarta.inject.Inject;
 
+import java.text.MessageFormat;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import static com.epam.indigoeln.common.exception.InvalidRequestException.validate;
 import static com.epam.indigoeln.common.util.ModelUtil.editProperty;
@@ -46,6 +53,14 @@ class CreateNotebookHandler extends AbstractNotebookMutationHandler<NotebookMuta
 @MutationHandlerFor(NotebookMutation.EditNotebookAttributes.class)
 class EditNotebookAttributesHandler extends AbstractNotebookMutationHandler<NotebookMutation.EditNotebookAttributes> {
 
+    private static final Set<ExperimentStatus> COMPATIBLE_EXPERIMENT_STATUSES =
+            EnumSet.of(ExperimentStatus.OPEN, ExperimentStatus.REOPEN, ExperimentStatus.ARCHIVED);
+    private static final String EXPERIMENT_STATUS_INCOMPATIBLE_MESSAGE = MessageFormat.format(
+            "You can rename a notebook with experiments only in status {0}",
+            COMPATIBLE_EXPERIMENT_STATUSES.stream()
+                    .map(ExperimentStatus::name)
+                    .collect(Collectors.joining("/")));
+
     @Inject
     ExperimentRepository experimentRepository;
     @Inject
@@ -71,6 +86,9 @@ class EditNotebookAttributesHandler extends AbstractNotebookMutationHandler<Note
         if (nameChanged) {
             String newNotebookName = mutation.name().get();
             List<ExperimentEntity> experiments = experimentRepository.findByNotebookWithACLEntities(notebook);
+
+            validateExperimentsStatus(experiments);
+
             for (ExperimentEntity experiment : experiments) {
                 experimentModelService.applyMutation(experiment, new ExperimentMutation.ExperimentNameUpdated(newNotebookName));
             }
@@ -78,6 +96,15 @@ class EditNotebookAttributesHandler extends AbstractNotebookMutationHandler<Note
 
         validate(updated, "Nothing to update");
         return entityMutationHelper.formatEditAttributesSummary(summaryList);
+    }
+
+    private void validateExperimentsStatus(Collection<ExperimentEntity> experiments) {
+        final boolean allExperimentsWithCompatibleStatus = experiments.stream()
+                .map(ExperimentEntity::getStatus)
+                .allMatch(COMPATIBLE_EXPERIMENT_STATUSES::contains);
+        if (!allExperimentsWithCompatibleStatus) {
+            throw new InvalidRequestException(EXPERIMENT_STATUS_INCOMPATIBLE_MESSAGE);
+        }
     }
 }
 
