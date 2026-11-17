@@ -8,6 +8,7 @@ import com.epam.indigoeln.common.model.search.StructuralSearch;
 import com.epam.indigoeln.common.util.ModelUtil;
 import com.epam.indigoeln.compound.entity.CompoundEntity;
 import com.epam.indigoeln.compound.entity.CompoundEntity_;
+import com.epam.indigoeln.eln.common.util.CriteriaFunctions;
 import com.epam.indigoeln.eln.entity.ExperimentEntity;
 import com.epam.indigoeln.eln.entity.ExperimentEntity_;
 import com.epam.indigoeln.eln.entity.ExperimentSearchBatch;
@@ -74,6 +75,8 @@ public class GlobalSearchRepository {
     UserService userService;
     @Inject
     ELNCriteriaConditions.Factory criteriaConditionsFactory;
+    @Inject
+    CriteriaFunctions criteriaFunctions;
     @Inject
     HibernateCriteriaBuilder cb;
     @PersistenceContext
@@ -183,11 +186,11 @@ public class GlobalSearchRepository {
                     roles = arrayAgg(null, experimentCompound.get(ExperimentSearchCompound_.REACTION_ROLE));
                     if (request.getMoleculeStructure().type() != StructuralSearch.Type.EXACT) {
                         // best-matching compound ranks the experiment; the per-compound value is not grouped
-                        similarity = max(conditions.moleculeSimilarity(compound.get(CompoundEntity_.molFile), request.getMoleculeStructure().query()));
+                        similarity = max(criteriaFunctions.moleculeSimilarity(compound.get(CompoundEntity_.molFile), request.getMoleculeStructure().query()));
                     }
                     groupBy(root.get(ExperimentEntity_.id));
                 }
-                Expression<?> textRank = request.getQuery() == null ? null : conditions.fullTextRank(root.get(ExperimentEntity_.searchVector), request.getQuery(), root.get(ExperimentEntity_.name));
+                Expression<?> textRank = request.getQuery() == null ? null : criteriaFunctions.fullTextRank(root.get(ExperimentEntity_.searchVector), request.getQuery(), root.get(ExperimentEntity_.name));
                 Map<String, Expression<?>> columns = unitedColumns(TYPE_EXPERIMENT, root.get(ExperimentEntity_.id), similarity, textRank, root.get(ExperimentEntity_.name), root.get(ExperimentEntity_.createdAt));
                 // reaction search
                 if (request.getReactionStructure() != null) {
@@ -237,7 +240,7 @@ public class GlobalSearchRepository {
                 }
                 conditions.user(root.get(ProjectEntity_.createdBy), request.getAuthor());
                 conditions.fullTextSearch(root.get(ProjectEntity_.searchVector), request.getQuery(), root.get(ProjectEntity_.name));
-                Expression<?> textRank = request.getQuery() == null ? null : conditions.fullTextRank(root.get(ProjectEntity_.searchVector), request.getQuery(), root.get(ProjectEntity_.name));
+                Expression<?> textRank = request.getQuery() == null ? null : criteriaFunctions.fullTextRank(root.get(ProjectEntity_.searchVector), request.getQuery(), root.get(ProjectEntity_.name));
                 Map<String, Expression<?>> columns = unitedColumns(TYPE_PROJECT, root.get(ProjectEntity_.id), null, textRank, root.get(ProjectEntity_.name), root.get(ProjectEntity_.createdAt));
                 select(tuple(aliased(columns)));
                 orderBy(sortOrder(columns::get, false, textRank != null));
@@ -257,7 +260,7 @@ public class GlobalSearchRepository {
                 }
                 conditions.user(root.get(NotebookEntity_.createdBy), request.getAuthor());
                 conditions.fullTextSearch(root.get(NotebookEntity_.searchVector), request.getQuery(), root.get(NotebookEntity_.name));
-                Expression<?> textRank = request.getQuery() == null ? null : conditions.fullTextRank(root.get(NotebookEntity_.searchVector), request.getQuery(), root.get(NotebookEntity_.name));
+                Expression<?> textRank = request.getQuery() == null ? null : criteriaFunctions.fullTextRank(root.get(NotebookEntity_.searchVector), request.getQuery(), root.get(NotebookEntity_.name));
                 Map<String, Expression<?>> columns = unitedColumns(TYPE_NOTEBOOK, root.get(NotebookEntity_.id), null, textRank, root.get(NotebookEntity_.name), root.get(NotebookEntity_.createdAt));
                 select(tuple(aliased(columns)));
                 orderBy(sortOrder(columns::get, false, textRank != null));
@@ -345,7 +348,7 @@ public class GlobalSearchRepository {
                     experiment.get(ExperimentEntity_.status)
             );
             if (hasFullTextSearch) {
-                columns.add(cb.function("ts_headline", String.class, literal("english"), description, literal("english"), literal(request.getQuery()), literal("StartSel=<mark>,StopSel=</mark>")));
+                columns.add(criteriaFunctions.fullTextHeadline(description, request.getQuery(), "StartSel=<mark>,StopSel=</mark>"));
             }
             if (hasRoles) {
                 columns.add(page.get("roles"));

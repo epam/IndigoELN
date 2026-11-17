@@ -25,11 +25,10 @@ import java.util.function.Function;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class CriteriaConditions {
 
-    private static final String SIMILARITY_METRIC_TANIMOTO = "Tanimoto";
-    private static final char LIKE_ESCAPE = '\\';
-
     @Inject
     protected HibernateCriteriaBuilder cb;
+    @Inject
+    protected CriteriaFunctions functions;
 
     protected final List<Predicate> predicates = new ArrayList<>();
 
@@ -55,10 +54,10 @@ public class CriteriaConditions {
             case TextSearch.WithValue w -> {
                 String value = valueConverter.apply(w.value().toLowerCase());
                 yield switch (w) {
-                    case TextSearch.ExactSearch e -> cb.lower(attribute).equalTo(value);
-                    case TextSearch.StartsWithSearch s -> cb.ilike(attribute, escapeLike(value) + '%', LIKE_ESCAPE);
-                    case TextSearch.EndsWithSearch e -> cb.ilike(attribute, '%' + escapeLike(value), LIKE_ESCAPE);
-                    case TextSearch.ContainsSearch c -> cb.ilike(attribute, '%' + escapeLike(value) + '%', LIKE_ESCAPE);
+                    case TextSearch.ExactSearch _ -> cb.lower(attribute).equalTo(value);
+                    case TextSearch.StartsWithSearch _ -> functions.startsWith(attribute, value);
+                    case TextSearch.EndsWithSearch _ -> functions.endsWith(attribute, value);
+                    case TextSearch.ContainsSearch _ -> functions.contains(attribute, value);
                 };
             }
             case TextSearch.BetweenSearch b -> {
@@ -92,59 +91,30 @@ public class CriteriaConditions {
 
     public void fullTextSearch(Expression<SearchVector> attribute, @Nullable String search, @Nullable Expression<String> name) {
         if (search != null) {
-            Predicate predicate = cb.isTrue(cb.function("full_text_search", Boolean.class, attribute, cb.literal("english"), cb.literal(search.replace('-', SearchVector.IDENTIFIER_SEPARATOR))));
+            Predicate predicate = cb.isTrue(functions.fullTextMatch(attribute, search));
             if (name != null) {
-                predicate = cb.or(predicate, nameMatches(name, search));
+                predicate = cb.or(predicate, functions.contains(name, search));
             }
             predicates.add(predicate);
         }
     }
 
-    public Expression<Double> fullTextRank(Expression<SearchVector> attribute, String search, @Nullable Expression<String> name) {
-        Expression<Double> rank = cb.function("ts_rank", Double.class, attribute, cb.literal("english"), cb.literal(search.replace('-', SearchVector.IDENTIFIER_SEPARATOR)));
-        if (name == null) {
-            return rank;
-        }
-        // ts_rank stays below 1, so a name match ranks above any text-only match; name matches are still ordered by ts_rank.
-        // Without the boost a name-only match (found by the fullTextSearch fallback) would rank 0, below every text match.
-        Expression<Double> nameBoost = cb.<Double>selectCase()
-                .when(nameMatches(name, search), cb.literal(1.0))
-                .otherwise(cb.literal(0.0));
-        return cb.sum(rank, nameBoost);
-    }
-
-    private Predicate nameMatches(Expression<String> name, String search) {
-        return cb.ilike(name, cb.literal("%" + escapeLike(search) + "%"), LIKE_ESCAPE);
-    }
-
-    private static String escapeLike(String value) {
-        return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
-    }
-
-    public Expression<String> fullTextHeadline(Expression<String> attribute, String search, String options) {
-        return cb.function("ts_headline", String.class, cb.literal("english"), attribute, cb.literal("english"), cb.literal(search), cb.literal(options));
-    }
-
     public void moleculeSearch(Expression<String> attribute, @Nullable StructuralSearch search) {
         if (search != null) {
             Expression<Boolean> expression = switch (search.type()) {
-                case StructuralSearch.Type.EXACT -> cb.function("bingo_exact_match", Boolean.class, attribute, cb.literal(search.query()), cb.literal(""));
-                case StructuralSearch.Type.SUBSTRUCTURE -> cb.function("bingo_substructure_match", Boolean.class, attribute, cb.literal(search.query()), cb.literal(""));
-                case StructuralSearch.Type.SIMILARITY -> cb.function("bingo_similarity_match", Boolean.class, attribute, cb.literal(0.8), cb.nullLiteral(Double.class), cb.literal(search.query()), cb.literal("Tanimoto"));
+                case StructuralSearch.Type.EXACT -> functions.moleculeExactMatch(attribute, search.query());
+                case StructuralSearch.Type.SUBSTRUCTURE -> functions.moleculeSubstructureMatch(attribute, search.query());
+                case StructuralSearch.Type.SIMILARITY -> functions.moleculeSimilarityMatch(attribute, search.query());
             };
             predicates.add(cb.isTrue(expression));
         }
     }
 
-    public Expression<Double> moleculeSimilarity(Expression<String> attribute, String query) {
-        return cb.function("bingo_getsimilarity", Double.class, attribute, cb.literal(query), cb.literal(SIMILARITY_METRIC_TANIMOTO));
-    }
-
     public void reactionSearch(Expression<String> attribute, @Nullable StructuralSearch search) {
         if (search != null) {
             Expression<Boolean> expression = switch (search.type()) {
-                case StructuralSearch.Type.EXACT -> cb.function("bingo_rexact_match", Boolean.class, attribute, cb.literal(search.query()), cb.literal(""));
-                case StructuralSearch.Type.SUBSTRUCTURE -> cb.function("bingo_rsubstructure_match", Boolean.class, attribute, cb.literal(search.query()), cb.literal(""));
+                case StructuralSearch.Type.EXACT -> functions.reactionExactMatch(attribute, search.query());
+                case StructuralSearch.Type.SUBSTRUCTURE -> functions.reactionSubstructureMatch(attribute, search.query());
                 case StructuralSearch.Type.SIMILARITY -> {
                     throw new InvalidRequestException("Reaction similarity search is not supported");
                 }
@@ -161,7 +131,7 @@ public class CriteriaConditions {
 
     public <T> void arrayContains(@Nullable T element, Expression<? extends Collection<T>> attribute) {
         if (element != null) {
-            predicates.add(cb.isTrue(cb.function("array_contains", Boolean.class, cb.literal(element), attribute)));
+            predicates.add(cb.isTrue(functions.arrayContains(element, attribute)));
         }
     }
 

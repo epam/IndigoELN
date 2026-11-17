@@ -2,12 +2,10 @@ package com.epam.indigoeln.reaction.service.mutation.experiment;
 
 import com.epam.indigoeln.common.exception.InvalidRequestException;
 import com.epam.indigoeln.compound.entity.CompoundEntity;
-import com.epam.indigoeln.compound.service.CompoundService;
 import com.epam.indigoeln.eln.entity.ExperimentEntity;
 import com.epam.indigoeln.eln.model.HealthHazardRef;
 import com.epam.indigoeln.eln.model.SaltCodeRef;
 import com.epam.indigoeln.eln.model.SampleSource;
-import com.epam.indigoeln.eln.service.DictionaryService;
 import com.epam.indigoeln.eln.util.ModelUtil;
 import com.epam.indigoeln.reaction.model.ExperimentModel;
 import com.epam.indigoeln.reaction.model.Reaction;
@@ -66,10 +64,6 @@ class RegisterSampleHandler extends AbstractReactionOutputSampleMutationHandler<
     @Inject
     @RestClient
     SampleRegistrationClient sampleRegistrationClient;
-    @Inject
-    CompoundService compoundService;
-    @Inject
-    DictionaryService dictionaryService;
 
     @Override
     public String handle(ExperimentEntity experiment, ExperimentModel model, Reaction reaction, ReactionOutput row, ReactionOutputSample sampleRow, ReactionOutputSampleMutation.RegisterSample mutation, ExperimentMutationContext context) {

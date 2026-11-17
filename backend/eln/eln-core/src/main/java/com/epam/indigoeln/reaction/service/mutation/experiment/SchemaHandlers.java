@@ -10,7 +10,6 @@ import com.epam.indigoeln.eln.entity.ExperimentEntity;
 import com.epam.indigoeln.eln.indigowrapper.IndigoMolecule;
 import com.epam.indigoeln.eln.indigowrapper.IndigoReaction;
 import com.epam.indigoeln.eln.model.SampleSource;
-import com.epam.indigoeln.eln.service.ExperimentService;
 import com.epam.indigoeln.reaction.model.CompoundRef;
 import com.epam.indigoeln.reaction.model.EnteredValue;
 import com.epam.indigoeln.reaction.model.ExperimentModel;
@@ -31,7 +30,6 @@ import com.epam.indigoeln.reaction.service.mutation.MutationHandlerFor;
 import com.google.common.base.Function;
 import com.google.common.base.MoreObjects;
 import jakarta.enterprise.context.Dependent;
-import jakarta.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 import one.util.streamex.IntStreamEx;
 import one.util.streamex.StreamEx;
@@ -54,9 +52,6 @@ class SetSchemeHandler extends AbstractReactionMutationHandler<ReactionMutation.
     private static final Comparator<ReactionRow> RXN_POSITION_COMPARATOR = Comparator.comparing(ReactionRow::getRxnPosition, Comparator.nullsLast(Comparator.naturalOrder()));
     private static final Comparator<ReactionInput> INPUT_COMPARATOR = Comparator.comparing(ReactionInput::getRole)
             .thenComparing(RXN_POSITION_COMPARATOR);
-
-    @Inject
-    ExperimentService experimentService;
 
     @Nullable
     IndigoReaction reaction;
