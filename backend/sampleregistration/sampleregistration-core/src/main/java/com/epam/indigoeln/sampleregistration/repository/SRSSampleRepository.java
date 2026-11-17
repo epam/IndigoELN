@@ -6,6 +6,7 @@ import com.epam.indigoeln.common.model.Paging;
 import com.epam.indigoeln.common.model.search.StructuralSearch;
 import com.epam.indigoeln.common.util.ModelUtil;
 import com.epam.indigoeln.eln.common.repository.BaseRepository;
+import com.epam.indigoeln.eln.common.util.CriteriaFunctions;
 import com.epam.indigoeln.sampleregistration.entity.SRSCompoundEntity;
 import com.epam.indigoeln.sampleregistration.entity.SRSCompoundEntity_;
 import com.epam.indigoeln.sampleregistration.entity.SRSSampleEntity;
@@ -38,6 +39,8 @@ public class SRSSampleRepository extends BaseRepository<SRSSampleEntity> {
     @Inject
     SRSCriteriaConditions.Factory criteriaConditionsFactory;
     @Inject
+    CriteriaFunctions criteriaFunctions;
+    @Inject
     HibernateCriteriaBuilder cb;
 
     public SRSSampleRepository() {
@@ -68,12 +71,12 @@ public class SRSSampleRepository extends BaseRepository<SRSSampleEntity> {
 
                 conditions.moleculeSearch(compound.get(SRSCompoundEntity_.molFile), request.getStructure());
                 if (request.getStructure() != null && request.getStructure().type() != StructuralSearch.Type.EXACT) {
-                    order.add(desc(conditions.moleculeSimilarity(compound.get(SRSCompoundEntity_.molFile), request.getStructure().query())));
+                    order.add(desc(criteriaFunctions.moleculeSimilarity(compound.get(SRSCompoundEntity_.molFile), request.getStructure().query())));
                 }
 
                 conditions.fullTextSearch(root.get(SRSSampleEntity_.searchVector), request.getQuickSearch(), null);
                 if (request.getQuickSearch() != null) {
-                    order.add(desc(conditions.fullTextRank(root.get(SRSSampleEntity_.searchVector), request.getQuickSearch(), null)));
+                    order.add(desc(criteriaFunctions.fullTextRank(root.get(SRSSampleEntity_.searchVector), request.getQuickSearch(), null)));
                 }
 
                 order.add(asc(compound.get(SRSCompoundEntity_.chemicalName), false));

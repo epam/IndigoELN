@@ -12,6 +12,7 @@ import com.epam.indigoeln.compound.mapper.SampleMapper;
 import com.epam.indigoeln.compound.model.SampleDTO;
 import com.epam.indigoeln.compound.model.search.FindSamplesRequest;
 import com.epam.indigoeln.eln.common.repository.BaseRepository;
+import com.epam.indigoeln.eln.common.util.CriteriaFunctions;
 import com.epam.indigoeln.eln.entity.UserEntity;
 import com.epam.indigoeln.eln.model.SampleSource;
 import com.epam.indigoeln.eln.util.ELNCriteriaConditions;
@@ -38,6 +39,8 @@ public class MarkedSampleRepository extends BaseRepository<MarkedSampleEntity> {
     SampleMapper sampleMapper;
     @Inject
     ELNCriteriaConditions.Factory criteriaConditionsFactory;
+    @Inject
+    CriteriaFunctions criteriaFunctions;
 
     public MarkedSampleRepository() {
         super(MarkedSampleEntity.class);
@@ -54,12 +57,12 @@ public class MarkedSampleRepository extends BaseRepository<MarkedSampleEntity> {
 
                 conditions.moleculeSearch(compound.get(CompoundEntity_.molFile), request.getStructure());
                 if (request.getStructure() != null && request.getStructure().type() != StructuralSearch.Type.EXACT) {
-                    order.add(desc(conditions.moleculeSimilarity(compound.get(CompoundEntity_.molFile), request.getStructure().query())));
+                    order.add(desc(criteriaFunctions.moleculeSimilarity(compound.get(CompoundEntity_.molFile), request.getStructure().query())));
                 }
 
                 conditions.fullTextSearch(root.get(MarkedSampleEntity_.searchVector), request.getQuickSearch(), null);
                 if (request.getQuickSearch() != null) {
-                    order.add(desc(conditions.fullTextRank(root.get(MarkedSampleEntity_.searchVector), request.getQuickSearch(), null)));
+                    order.add(desc(criteriaFunctions.fullTextRank(root.get(MarkedSampleEntity_.searchVector), request.getQuickSearch(), null)));
                 }
 
                 order.add(asc(compound.get(CompoundEntity_.chemicalName), false));
