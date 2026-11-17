@@ -41,7 +41,7 @@ public class UserRepository extends BaseRepository<UserEntity> {
             select(root);
             where(root.get(UserEntity_.username).equalTo(username));
         }};
-        return map(doFindOne(criteria, em.getEntityGraph("User.info")), userMapper::convertUserInfo);
+        return map(doFindOne(criteria, em.getEntityGraph("User.info")), UserEntity::toInfo);
     }
 
     @Nullable
@@ -51,7 +51,7 @@ public class UserRepository extends BaseRepository<UserEntity> {
             select(root);
             where(root.get(IdentifiableEntity_.id).equalTo(id));
         }};
-        return map(doFindOne(criteria, em.getEntityGraph("User.info")), userMapper::convertUserInfo);
+        return map(doFindOne(criteria, em.getEntityGraph("User.info")), UserEntity::toInfo);
     }
 
     public List<UserRef> suggest(@Nullable String search) {

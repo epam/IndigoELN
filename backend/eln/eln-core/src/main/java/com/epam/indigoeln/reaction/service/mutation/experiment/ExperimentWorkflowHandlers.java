@@ -112,8 +112,6 @@ class CompleteExperimentHandler extends ExperimentWorkflowMutationHandlerBase<Ex
 class SubmitExperimentHandler extends ExperimentWorkflowMutationHandlerBase<ExperimentMutation.SubmitExperiment> {
 
     @Inject
-    ExperimentService experimentService;
-    @Inject
     @RestClient
     SignatureClient signatureClient;
 
