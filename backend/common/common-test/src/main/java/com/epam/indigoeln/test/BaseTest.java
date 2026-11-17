@@ -22,6 +22,7 @@ import org.mockito.Mockito;
 
 import java.net.URI;
 import java.util.Arrays;
+import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -55,12 +56,9 @@ public abstract class BaseTest {
     @BeforeEach
     void setupBase(TestInfo testInfo) {
         username.set(null);
-        TestSecurity testSecurity = AnnotationSupport.findAnnotation(testInfo.getTestMethod().get(), TestSecurity.class)
-                .or(() -> AnnotationSupport.findAnnotation(testInfo.getTestClass().get(), TestSecurity.class))
-                .orElse(null);
-        if (testSecurity != null) {
-            username.set(testSecurity.user());
-        }
+        Optional<TestSecurity> testSecurity = testInfo.getTestMethod().flatMap(m -> AnnotationSupport.findAnnotation(m, TestSecurity.class))
+                .or(() -> testInfo.getTestClass().flatMap(c -> AnnotationSupport.findAnnotation(c, TestSecurity.class)));
+        testSecurity.ifPresent(ts -> username.set(ts.user()));
     }
 
     protected <T> T buildClient(Class<T> klass) {
@@ -71,6 +69,7 @@ public abstract class BaseTest {
     protected void withUser(String username, Runnable runnable) {
         withUser(username, () -> {
             runnable.run();
+            //noinspection DataFlowIssue
             return null;
         });
     }

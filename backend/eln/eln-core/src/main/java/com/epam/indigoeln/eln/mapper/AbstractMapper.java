@@ -52,13 +52,13 @@ public abstract class AbstractMapper {
         return dictionaryService.get(entity);
     }
 
-    public UserRef convertUserRef(UserEntity entity) {
-        //noinspection ConstantValue
+    @Nullable
+    public UserRef convertUserRef(@Nullable UserEntity entity) {
         return entity != null ? entity.toRef() : null;
     }
 
-    public UserInfo convertUserInfo(UserEntity entity) {
-        //noinspection ConstantValue
+    @Nullable
+    public UserInfo convertUserInfo(@Nullable UserEntity entity) {
         return entity != null ? entity.toInfo() : null;
     }
 }
