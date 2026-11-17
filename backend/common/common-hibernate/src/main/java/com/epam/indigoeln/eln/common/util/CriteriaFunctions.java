@@ -12,8 +12,7 @@ import java.util.Collection;
 @ApplicationScoped
 public class CriteriaFunctions {
 
-    static final char LIKE_ESCAPE = '\\';
-
+    private static final char LIKE_ESCAPE = '\\';
     private static final String SIMILARITY_METRIC_TANIMOTO = "Tanimoto";
     private static final String ENGLISH = "english";
 
@@ -32,7 +31,7 @@ public class CriteriaFunctions {
         // ts_rank stays below 1, so a name match ranks above any text-only match; name matches are still ordered by ts_rank.
         // Without the boost a name-only match (found by the fullTextSearch fallback) would rank 0, below every text match.
         Expression<Double> nameBoost = cb.<Double>selectCase()
-                .when(nameMatches(name, search), cb.literal(1.0))
+                .when(contains(name, search), cb.literal(1.0))
                 .otherwise(cb.literal(0.0));
         return cb.sum(rank, nameBoost);
     }
@@ -69,11 +68,19 @@ public class CriteriaFunctions {
         return cb.function("array_contains", Boolean.class, cb.literal(element), attribute);
     }
 
-    Predicate nameMatches(Expression<String> name, String search) {
-        return cb.ilike(name, cb.literal("%" + escapeLike(search) + "%"), LIKE_ESCAPE);
+    public Predicate startsWith(Expression<String> attribute, String value) {
+        return cb.ilike(attribute, escapeLike(value) + '%', LIKE_ESCAPE);
     }
 
-    static String escapeLike(String value) {
+    public Predicate endsWith(Expression<String> attribute, String value) {
+        return cb.ilike(attribute, '%' + escapeLike(value), LIKE_ESCAPE);
+    }
+
+    public Predicate contains(Expression<String> attribute, String value) {
+        return cb.ilike(attribute, '%' + escapeLike(value) + '%', LIKE_ESCAPE);
+    }
+
+    private static String escapeLike(String value) {
         return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
     }
 

@@ -28,7 +28,7 @@ public class CriteriaConditions {
     @Inject
     protected HibernateCriteriaBuilder cb;
     @Inject
-    CriteriaFunctions functions;
+    protected CriteriaFunctions functions;
 
     protected final List<Predicate> predicates = new ArrayList<>();
 
@@ -55,9 +55,9 @@ public class CriteriaConditions {
                 String value = valueConverter.apply(w.value().toLowerCase());
                 yield switch (w) {
                     case TextSearch.ExactSearch _ -> cb.lower(attribute).equalTo(value);
-                    case TextSearch.StartsWithSearch _ -> cb.ilike(attribute, CriteriaFunctions.escapeLike(value) + '%', CriteriaFunctions.LIKE_ESCAPE);
-                    case TextSearch.EndsWithSearch _ -> cb.ilike(attribute, '%' + CriteriaFunctions.escapeLike(value), CriteriaFunctions.LIKE_ESCAPE);
-                    case TextSearch.ContainsSearch _ -> cb.ilike(attribute, '%' + CriteriaFunctions.escapeLike(value) + '%', CriteriaFunctions.LIKE_ESCAPE);
+                    case TextSearch.StartsWithSearch _ -> functions.startsWith(attribute, value);
+                    case TextSearch.EndsWithSearch _ -> functions.endsWith(attribute, value);
+                    case TextSearch.ContainsSearch _ -> functions.contains(attribute, value);
                 };
             }
             case TextSearch.BetweenSearch b -> {
@@ -93,7 +93,7 @@ public class CriteriaConditions {
         if (search != null) {
             Predicate predicate = cb.isTrue(functions.fullTextMatch(attribute, search));
             if (name != null) {
-                predicate = cb.or(predicate, functions.nameMatches(name, search));
+                predicate = cb.or(predicate, functions.contains(name, search));
             }
             predicates.add(predicate);
         }

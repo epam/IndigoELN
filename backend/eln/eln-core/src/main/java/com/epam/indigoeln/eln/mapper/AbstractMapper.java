@@ -4,7 +4,6 @@ import com.epam.indigoeln.common.model.UserRef;
 import com.epam.indigoeln.eln.entity.ACLEntry;
 import com.epam.indigoeln.eln.entity.DictionaryItemEntity;
 import com.epam.indigoeln.eln.entity.UserEntity;
-import com.epam.indigoeln.eln.entity.UserInfo;
 import com.epam.indigoeln.eln.entity.WithACL;
 import com.epam.indigoeln.eln.model.ACLEntryDTO;
 import com.epam.indigoeln.eln.model.AccessLevel;
@@ -55,10 +54,5 @@ public abstract class AbstractMapper {
     @Nullable
     public UserRef convertUserRef(@Nullable UserEntity entity) {
         return entity != null ? entity.toRef() : null;
-    }
-
-    @Nullable
-    public UserInfo convertUserInfo(@Nullable UserEntity entity) {
-        return entity != null ? entity.toInfo() : null;
     }
 }

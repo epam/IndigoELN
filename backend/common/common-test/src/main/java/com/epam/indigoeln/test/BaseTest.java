@@ -67,15 +67,14 @@ public abstract class BaseTest {
     }
 
     protected void withUser(String username, Runnable runnable) {
-        withUser(username, () -> {
+        this.<@Nullable Object>withUser(username, () -> {
             runnable.run();
-            //noinspection DataFlowIssue
             return null;
         });
     }
 
     @SneakyThrows
-    protected <T> T withUser(String username, Callable<T> callable) {
+    protected <T extends @Nullable Object> T withUser(String username, Callable<T> callable) {
         String oldUsername = this.username.get();
         try {
             this.username.set(username);
