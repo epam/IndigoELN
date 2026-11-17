@@ -12,18 +12,20 @@ import java.util.Collection;
 @ApplicationScoped
 public class CriteriaFunctions {
 
-    private static final String SIMILARITY_METRIC_TANIMOTO = "Tanimoto";
     static final char LIKE_ESCAPE = '\\';
+
+    private static final String SIMILARITY_METRIC_TANIMOTO = "Tanimoto";
+    private static final String ENGLISH = "english";
 
     @Inject
     HibernateCriteriaBuilder cb;
 
     public Expression<Boolean> fullTextMatch(Expression<SearchVector> attribute, String search) {
-        return cb.function("full_text_search", Boolean.class, attribute, cb.literal("english"), cb.literal(fullTextQuery(search)));
+        return cb.function("full_text_search", Boolean.class, attribute, cb.literal(ENGLISH), cb.literal(fullTextQuery(search)));
     }
 
     public Expression<Double> fullTextRank(Expression<SearchVector> attribute, String search, @Nullable Expression<String> name) {
-        Expression<Double> rank = cb.function("ts_rank", Double.class, attribute, cb.literal("english"), cb.literal(fullTextQuery(search)));
+        Expression<Double> rank = cb.function("ts_rank", Double.class, attribute, cb.literal(ENGLISH), cb.literal(fullTextQuery(search)));
         if (name == null) {
             return rank;
         }
@@ -36,7 +38,7 @@ public class CriteriaFunctions {
     }
 
     public Expression<String> fullTextHeadline(Expression<String> attribute, String search, String options) {
-        return cb.function("ts_headline", String.class, cb.literal("english"), attribute, cb.literal("english"), cb.literal(search), cb.literal(options));
+        return cb.function("ts_headline", String.class, cb.literal(ENGLISH), attribute, cb.literal(ENGLISH), cb.literal(search), cb.literal(options));
     }
 
     public Expression<Boolean> moleculeExactMatch(Expression<String> attribute, String query) {

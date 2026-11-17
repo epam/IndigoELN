@@ -54,10 +54,10 @@ public class CriteriaConditions {
             case TextSearch.WithValue w -> {
                 String value = valueConverter.apply(w.value().toLowerCase());
                 yield switch (w) {
-                    case TextSearch.ExactSearch e -> cb.lower(attribute).equalTo(value);
-                    case TextSearch.StartsWithSearch s -> cb.ilike(attribute, CriteriaFunctions.escapeLike(value) + '%', CriteriaFunctions.LIKE_ESCAPE);
-                    case TextSearch.EndsWithSearch e -> cb.ilike(attribute, '%' + CriteriaFunctions.escapeLike(value), CriteriaFunctions.LIKE_ESCAPE);
-                    case TextSearch.ContainsSearch c -> cb.ilike(attribute, '%' + CriteriaFunctions.escapeLike(value) + '%', CriteriaFunctions.LIKE_ESCAPE);
+                    case TextSearch.ExactSearch _ -> cb.lower(attribute).equalTo(value);
+                    case TextSearch.StartsWithSearch _ -> cb.ilike(attribute, CriteriaFunctions.escapeLike(value) + '%', CriteriaFunctions.LIKE_ESCAPE);
+                    case TextSearch.EndsWithSearch _ -> cb.ilike(attribute, '%' + CriteriaFunctions.escapeLike(value), CriteriaFunctions.LIKE_ESCAPE);
+                    case TextSearch.ContainsSearch _ -> cb.ilike(attribute, '%' + CriteriaFunctions.escapeLike(value) + '%', CriteriaFunctions.LIKE_ESCAPE);
                 };
             }
             case TextSearch.BetweenSearch b -> {
