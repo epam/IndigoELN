@@ -19,6 +19,9 @@ x-service-default-env: &service-default-env
   QUARKUS_TLS_TRUST_ALL: true
   QUARKUS_LOG_CONSOLE_JSON_ENABLED: "false"
   QUARKUS_LOG_LEVEL: INFO # DEBUG
+  # CVE-2026-114938 mitigation: disable vulnerable AVX-512 Base64 intrinsic; drop once image ships fixed JDK.
+  # JAVA_TOOL_OPTIONS, since JAVA_OPTS / JAVA_OPTS_APPEND would override the launcher's and Dockerfile's flags.
+  JAVA_TOOL_OPTIONS: "-XX:-UseBASE64Intrinsics"
   # QUARKUS_REST_CLIENT_LOGGING_SCOPE: "request-response"
   # QUARKUS_REST_CLIENT_LOGGING_BODY_LIMIT: "9999"
   # QUARKUS_REST_CLIENT_EXTENSIONS_API_SCOPE: "all"
@@ -164,6 +167,7 @@ services:
       KC_HTTP_MANAGEMENT_PORT: 9005
       KC_HTTP_MANAGEMENT_HEALTH_ENABLED: true
       KC_METRICS_ENABLED: true
+      JAVA_TOOL_OPTIONS: "-XX:-UseBASE64Intrinsics" # CVE-2026-114938 mitigation
     depends_on:
       postgres:
         condition: service_healthy

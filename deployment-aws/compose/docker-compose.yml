@@ -40,6 +40,11 @@ x-oidc: &oidc
 x-jvm-memory: &jvm-memory
   JAVA_MAX_MEM_RATIO: "60"
 
+# CVE-2026-114938 mitigation: disable vulnerable AVX-512 Base64 intrinsic; drop once image ships fixed JDK.
+# JAVA_TOOL_OPTIONS is read by the JVM itself, so it doesn't clobber JAVA_OPTS_APPEND (see above).
+x-jvm-cve-mitigation: &jvm-cve-mitigation
+  JAVA_TOOL_OPTIONS: "-XX:-UseBASE64Intrinsics"
+
 services:
 
   postgres:
@@ -80,7 +85,7 @@ services:
     # Largest share: holds the Indigo native renderer and the global search paths.
     mem_limit: 1152m
     environment:
-      <<: [*oidc, *jvm-memory]
+      <<: [*oidc, *jvm-memory, *jvm-cve-mitigation]
       QUARKUS_DATASOURCE_JDBC_URL: "jdbc:postgresql://postgres:5432/eln"
       QUARKUS_DATASOURCE_USERNAME: eln
       QUARKUS_DATASOURCE_PASSWORD: "${DB_PASSWORD}"
@@ -104,7 +109,7 @@ services:
     # JasperReports PDF generation is the spikiest path here, so it keeps more than the other two.
     mem_limit: 576m
     environment:
-      <<: *jvm-memory
+      <<: [*jvm-memory, *jvm-cve-mitigation]
       ELN_API_SECRET: "${ELN_API_SECRET}"
       AWS_REGION: "${AWS_REGION}"
       QUARKUS_LOG_LEVEL: INFO
@@ -114,7 +119,7 @@ services:
     image: "${SIGNATURE_AWS_IMAGE}"
     mem_limit: 448m
     environment:
-      <<: [*oidc, *jvm-memory]
+      <<: [*oidc, *jvm-memory, *jvm-cve-mitigation]
       QUARKUS_DATASOURCE_JDBC_URL: "jdbc:postgresql://postgres:5432/signature"
       QUARKUS_DATASOURCE_USERNAME: signature
       QUARKUS_DATASOURCE_PASSWORD: "${DB_PASSWORD}"
@@ -135,7 +140,7 @@ services:
     platform: linux/amd64
     mem_limit: 448m
     environment:
-      <<: [*oidc, *jvm-memory]
+      <<: [*oidc, *jvm-memory, *jvm-cve-mitigation]
       QUARKUS_DATASOURCE_JDBC_URL: "jdbc:postgresql://postgres:5432/sampleregistration"
       QUARKUS_DATASOURCE_USERNAME: sampleregistration
       QUARKUS_DATASOURCE_PASSWORD: "${DB_PASSWORD}"
