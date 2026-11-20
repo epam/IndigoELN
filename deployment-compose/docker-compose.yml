@@ -8,6 +8,11 @@ x-service-defaults: &service-defaults
     retries: 3
     start_period: 60s
 
+# CVE-2026-114938 mitigation for third-party JVM images (our services carry it in Dockerfile.jvm);
+# drop once those images ship a fixed JDK.
+x-jvm-cve-mitigation: &jvm-cve-mitigation
+  JAVA_TOOL_OPTIONS: "-XX:-UseBASE64Intrinsics"
+
 x-service-default-env: &service-default-env
   QUARKUS_PROFILE: ${QUARKUS_PROFILE}
   ELN_API_SECRET: secret
@@ -153,6 +158,7 @@ services:
     image: keycloak/keycloak:26.5.6
     command: start-dev --health-enabled=true --log-level=ERROR 
     environment:
+      <<: *jvm-cve-mitigation
       KC_DB: postgres
       KC_HOSTNAME: localhost
       KC_DB_URL: "jdbc:postgresql://postgres:5432/keycloak"
@@ -196,6 +202,7 @@ services:
     depends_on:
       - keycloak-healthcheck
     environment:
+      <<: *jvm-cve-mitigation
       KEYCLOAK_URL: http://keycloak:8080
       KEYCLOAK_USER: admin
       KEYCLOAK_PASSWORD: admin
