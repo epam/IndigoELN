@@ -168,7 +168,11 @@ public class SonarQubeStack extends Stack {
                 .environment(mapOf(
                         entry("SONAR_JDBC_URL", "jdbc:postgresql://127.0.0.1:5432/sonar"),
                         entry("SONAR_JDBC_USERNAME", Credentials.fromSecret(dbSecret).getUsername()),
-                        entry("SONAR_JDBC_PASSWORD", Credentials.fromSecret(dbSecret).getPassword().unsafeUnwrap())
+                        entry("SONAR_JDBC_PASSWORD", Credentials.fromSecret(dbSecret).getPassword().unsafeUnwrap()),
+                        // CVE-2026-114938 mitigation: disable vulnerable AVX-512 Base64 intrinsic; drop once image ships fixed JDK
+                        entry("SONAR_WEB_JAVAADDITIONALOPTS", "-XX:-UseBASE64Intrinsics"),
+                        entry("SONAR_CE_JAVAADDITIONALOPTS", "-XX:-UseBASE64Intrinsics"),
+                        entry("SONAR_SEARCH_JAVAADDITIONALOPTS", "-XX:-UseBASE64Intrinsics")
                 ))
                 .portMappings(List.of(PortMapping.builder().containerPort(9000).build()))
                 .ulimits(List.of(
