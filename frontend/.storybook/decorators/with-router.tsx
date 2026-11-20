@@ -17,6 +17,8 @@ const LINK_PATHS = [
   '/notebooks/$id/experiments',
   '/experiments/$id',
   '/dictionaries',
+  '/templates',
+  '/templates/$id',
   '/signatures',
   '/login',
 ] as const;
