@@ -115,6 +115,9 @@ const CRITERIA_KEYS = [
  * PubChem round trip spent saying so.
  */
 export function isEmpty(values: AddMaterialFormValues): boolean {
+  // My Materials is the user's own short list, so the catalog on its own does ask something:
+  // "what have I saved?" — which is what choosing it is expected to show.
+  if (values.catalog === 'MY_MATERIALS') return false;
   const request = toFindSamplesRequest(values);
   return CRITERIA_KEYS.every((key) => request[key] == null);
 }

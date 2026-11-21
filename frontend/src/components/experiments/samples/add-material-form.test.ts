@@ -127,6 +127,11 @@ describe('isEmpty', () => {
     expect(isEmpty(form({ catalog: 'SRS', compoundKey: { type: 'exact', value: 'ASA' } }))).toBe(false);
   });
 
+  /** #801. My Materials is the user's own list; the catalog alone asks for all of it. */
+  it('is false for My Materials even with nothing filled in', () => {
+    expect(isEmpty(form({ catalog: 'MY_MATERIALS' }))).toBe(false);
+  });
+
   it('ignores whitespace in the quick search, as the request does', () => {
     expect(isEmpty(form({ quickSearch: '   ' }))).toBe(true);
   });
