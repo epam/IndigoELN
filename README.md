@@ -1,30 +1,28 @@
-# Indigo-ELN-v.-2.0
+# Indigo ELN
 
-Indigo - The Open-Source Chemistry Electronic Lab Notebook
+The Open-Source Chemistry Electronic Lab Notebook
+
 
 # Sandbox
 
-https://indigo-eln.test.lifescience.opensource.epam.com/
-please contact indigoeln@epam.com to request access
+To evaluate Indigo ELN features without running it yourself, you can use the sandbox: 
+https://indigo-eln.lifescience.opensource.epam.com/
+
+Please contact indigoeln@epam.com to request access
+
 
 # Installation
 
-**NB**: Indigo ELN is currently being severely transformed. Deployment script, application code and documentation may contain errors and inconsistencies.
-
-Please contact the Indigo ELN team in case of any questions.
-
-**NB**: Right now, build script assumes the application is deployed into us-east-1 region (North Virginia) because it uses AWS Public Container Registry which is only available in this region.
-However, you can copy images to your own ECR repository and adjust XXXServiceTag parameters to refer to that repository.
-
+Indigo ELN can be run either in your own local or network machine, or in AWS cloud.
 
 ## Local Installation
 
-The local docker-compose stack runs the full application — frontend, backend (`eln-service`), PostgreSQL, and Keycloak — and is the recommended setup for local development.
+The local docker-compose stack runs the full application — frontend, backend, PostgreSQL, and Keycloak — and is the recommended setup for local development.
 
 ### Prerequisites
 
 - Docker with Docker Compose v2 (`docker compose ...`)
-- Java 21 (required for the Gradle backend build)
+- Java 25 (required for the Gradle backend build)
 - ~4 GB of free RAM
 
 ### Running on macOS
@@ -81,46 +79,86 @@ cd ../deployment-compose && docker compose up --build
 
 
 ## Installation on AWS
-- Check our Indigo ELN repository:
+
+**NB**: Right now, the AWS deployment must go to the us-east-1 region (North Virginia): the stack creates the TLS certificate in its own region and attaches it to CloudFront, which only accepts certificates from us-east-1.
+The application images are pulled from AWS Public Container Registry by default; you can copy them to your own ECR repository and point the `*Image` parameters (`elnAwsImage` etc.) at that repository instead.
+
+
+### Prerequisites
+
+- AWS CLI, with `AWS_PROFILE` set to the profile to deploy with (`deploy.sh` passes it to `cdk`), and the Session Manager plugin for connecting to the instance
+- AWS CDK CLI (requires Node.js)
+- Maven and JDK 17 (`deploy.sh` sets `JAVA_HOME=/usr/lib/jvm/java-17-openjdk`; adjust if yours lives elsewhere)
+- An existing VPC and a Route 53 hosted zone; the application domain must belong to that zone, as the TLS certificate is validated through DNS
+
+### Get the code
+
 ```bash
 git clone https://github.com/epam/IndigoELN.git
-cd IndigoELN
+cd IndigoELN/deployment-aws
 ```
 
-### Deploy a CloudFormation script
-`indigo_eln_script.yaml`
+### Configure
 
-You can do it via AWS Console or AWS CLI (`aws cloudformation create-stack`) or a helper tool like Rain (https://github.com/aws-cloudformation/rain)
+Copy `cdk.json.example` to `cdk.json`.
 
-Be sure to review the script adjust parameters before deploy.
+Copy `global.json.example` to `global.json` and edit it according to your environment. List the environments you want in `environments`.
 
-Some required parameters:
-- KeyPairName: Name of an existing Amazon EC2 key pair to enable SSH or RDP access to the instances
-- VPCId: ID of your existing AWS VPC
-- HostedZoneId: Existing Route53 Hosted zone ID
-- IndigoELNDomainName: Domain name where Indigo ELN will be hosted
-- IndigoELNAPIDomainName: Domain name where Indigo ELN API will be hosted
-- IndigoELNContentBucketName: S3 bucket where frontend code will be served from (will be created)
-- IndigoELNBuildLogsBucketName: S3 bucket where build logs are stored (will be created)
-- MongoDBPassword: password for the created instance of MongoDB
-- DefaultAdminPassword: password for main application admin user, BCrypt encoded
+For each environment listed there, copy `environment.json.example` to `<<environment-name>>.json` and edit it according to your environment. Every listed environment needs its file, because every CDK run loads all of them.
 
-Also, update image tags for the Docker images used. Typically, you need the latest time tag with given prefix. Latest tags at the time of writing are already included in the CloudFormation script. Alternatively, you can find it here https://gallery.ecr.aws/m5k0g6n7/indigo_eln. 
+Remove the `//` comments from all these JSON files: they are not valid JSON and the deployment code rejects them.
+
+The `sonar*` parameters in `global.json` are needed even if you never deploy the build and SonarQube stacks, since every CDK run synthesizes them too.
+
+### Bootstrap CDK
+
+Once per account and region:
+```bash
+cdk bootstrap aws://<<account>>/us-east-1 --template cdk-bootstrap.yaml
+```
+If you use `permissionBoundary`, add `--custom-permissions-boundary <<policy-name>>`.
+
+### Deploy CDK stack
+
+Run CDK deployment (stack-name is "indigoeln-" plus environment name):
+```bash
+./deploy.sh <<stack-name>>
+```
+
+After it runs successfully, update docker-compose deployment:
+
+```bash
+./deploy-compose.sh <<stack-name>>
+```
+
+### Set the admin password
+
+The stack creates an `admin` user in Cognito without a usable password. Set one, either from AWS Console in browser or from command line:
+```bash
+USER_POOL_ID=$(aws ssm get-parameter --name /indigoeln/<<environment-name>>/compose-env \
+  --query Parameter.Value --output text | sed -n 's/^ELN_COGNITO_USER_POOL_ID=//p')
+aws cognito-idp admin-set-user-password --user-pool-id "$USER_POOL_ID" \
+  --username admin --password '<<password>>' --permanent
+```
 
 ### Validate installation and troubleshooting
 
 - Make sure CloudFormation stack is deployed and all resources created without errors.
 
-- Connect to EC2 instance using specified key pair, make sure all docker containers are running:
-```bash
-docker ps
-```
-There should be 8 containers running: mongo-db, postgres-signature, postgres-crs, bingodb, server, signature, crs, indigo
+- Connect to the EC2 instance with SSM Session Manager (the instance accepts no inbound connections unless your own security groups allow them):
 
-If there are fewer of them, you can find IDs of stopped containers and inspect its logs:
 ```bash
-docker ps --all
-docker logs <container_id>
+aws ssm start-session --target <<instance-id>>
 ```
 
-- Now you can log into the application using the domain name you specified in the CloudFormation script (default credentials is admin/admin, if you didn't change the password parameter)
+- Make sure all docker containers are running:
+
+```bash
+cd /opt/indigoeln
+sudo docker compose ps --all
+sudo docker compose logs <<service>>
+```
+
+Container logs are also sent to the CloudWatch log group `/indigoeln/<<environment-name>>/compose`.
+
+- Now you can log into the application at `https://<<domainName>>` (the `domainName` from `<<environment-name>>.json`) as `admin` with the password you set.

@@ -24,11 +24,13 @@ public class StageParameters {
     /** Must be the AZ the Postgres data volume lives in; a standalone EBS only attaches within one AZ. */
     private String dataVolumeAz;
     private List<String> lambdaSubnets;
-    private String postgresImageTag;
-    private String elnAwsImageTag;
-    private String reportsAwsImageTag;
-    private String signatureAwsImageTag;
-    private String sampleRegistrationAwsImageTag;
+    // Full image references, registry and tag included: a private ECR repository
+    // (<account>.dkr.ecr.<region>.amazonaws.com/indigoeln/eln-aws:<tag>) or a public one (public.ecr.aws/...).
+    private String postgresImage;
+    private String elnAwsImage;
+    private String reportsAwsImage;
+    private String signatureAwsImage;
+    private String sampleRegistrationAwsImage;
     private String storageBucketName;
     private boolean createS3Gateway;
 

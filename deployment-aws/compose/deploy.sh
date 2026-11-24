@@ -45,8 +45,13 @@ ELN_API_SECRET=$(aws secretsmanager get-secret-value --secret-id "$API_SECRET_ID
   --query SecretString --output text)
 printf 'ELN_API_SECRET=%s\n' "$ELN_API_SECRET" >> "$APP_DIR/.env"
 
-REGISTRY=$(awk -F= '/^ELN_AWS_IMAGE=/{split($2,a,"/"); print a[1]}' "$APP_DIR/.env")
-aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$REGISTRY"
+# Images may come from private ECR (any account/region) or from public registries. Log into each
+# distinct private ECR registry; public.ecr.aws and the rest are pulled anonymously.
+for REGISTRY in $(awk -F= '/^[A-Z_]+_IMAGE=/{split($2,a,"/"); print a[1]}' "$APP_DIR/.env" | sort -u); do
+  if [[ "$REGISTRY" =~ ^[0-9]+\.dkr\.ecr\.([a-z0-9-]+)\.amazonaws\.com$ ]]; then
+    aws ecr get-login-password --region "${BASH_REMATCH[1]}" | docker login --username AWS --password-stdin "$REGISTRY"
+  fi
+done
 
 cd "$APP_DIR"
 # Fail before anything starts if .env lacks a variable docker-compose.yml requires (x-required-env),

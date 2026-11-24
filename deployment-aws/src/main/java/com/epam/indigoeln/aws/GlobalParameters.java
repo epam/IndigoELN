@@ -23,6 +23,7 @@ public class GlobalParameters {
     private String sonarDomainName;
     private String sonarPostgresMasterUsername;
     private String sonarImage;
+    private List<String> environments;
 
     @SneakyThrows
     public static GlobalParameters load() {

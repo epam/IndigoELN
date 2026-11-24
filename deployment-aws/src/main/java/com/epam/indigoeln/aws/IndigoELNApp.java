@@ -5,7 +5,6 @@ import software.amazon.awscdk.Environment;
 import software.amazon.awscdk.PermissionsBoundary;
 import software.amazon.awscdk.StackProps;
 
-import java.util.List;
 import java.util.Map;
 
 public class IndigoELNApp {
@@ -52,7 +51,7 @@ public class IndigoELNApp {
                 .build()
                 , sonarQubeProps);
 
-        for (String envName : List.of("dev", "test", "demo")) {
+        for (String envName : globalParameters.getEnvironments()) {
             StageParameters stageParameters = StageParameters.load(envName);
 
             MainStack mainStack = new MainStack(app, "indigoeln-" + envName, StackProps.builder()

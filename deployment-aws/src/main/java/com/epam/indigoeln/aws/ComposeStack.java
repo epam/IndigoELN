@@ -2,7 +2,6 @@ package com.epam.indigoeln.aws;
 
 import software.amazon.awscdk.RemovalPolicy;
 import software.amazon.awscdk.services.ec2.Instance;
-import software.amazon.awscdk.services.ecr.IRepository;
 import software.amazon.awscdk.services.iam.PolicyStatement;
 import software.amazon.awscdk.services.iam.Role;
 import software.amazon.awscdk.services.logs.LogGroup;
@@ -63,11 +62,11 @@ public class ComposeStack {
         String env = String.join("\n",
                 "AWS_REGION=" + props.region(),
                 "AWS_LOG_GROUP=" + props.logGroupName(),
-                "POSTGRES_IMAGE=" + image(props.postgresRepo(), props.postgresImageTag()),
-                "ELN_AWS_IMAGE=" + image(props.elnAwsRepo(), props.elnAwsImageTag()),
-                "REPORTS_AWS_IMAGE=" + image(props.reportsAwsRepo(), props.reportsAwsImageTag()),
-                "SIGNATURE_AWS_IMAGE=" + image(props.signatureAwsRepo(), props.signatureAwsImageTag()),
-                "SAMPLEREGISTRATION_AWS_IMAGE=" + image(props.sampleRegistrationAwsRepo(), props.sampleRegistrationAwsImageTag()),
+                "POSTGRES_IMAGE=" + props.postgresImage(),
+                "ELN_AWS_IMAGE=" + props.elnAwsImage(),
+                "REPORTS_AWS_IMAGE=" + props.reportsAwsImage(),
+                "SIGNATURE_AWS_IMAGE=" + props.signatureAwsImage(),
+                "SAMPLEREGISTRATION_AWS_IMAGE=" + props.sampleRegistrationAwsImage(),
                 "ELN_COGNITO_USER_POOL_ID=" + props.userPool().getUserPoolId(),
                 "ELN_STORAGE_S3_BUCKET=" + props.storageBucket().getBucketName(),
                 // The name, not the value: deploy.sh resolves it, as it does the database password.
@@ -113,10 +112,6 @@ public class ComposeStack {
         software.amazon.awscdk.Tags.of(props.instance()).add("indigoeln:env", props.envName());
     }
 
-    private static String image(IRepository repo, String tag) {
-        return repo.getRepositoryUri() + ":" + tag;
-    }
-
     public record Props(
             String envName,
             String region,
@@ -125,15 +120,10 @@ public class ComposeStack {
             Role ec2Role,
             IBucket storageBucket,
             IUserPool userPool,
-            IRepository postgresRepo,
-            String postgresImageTag,
-            IRepository elnAwsRepo,
-            String elnAwsImageTag,
-            IRepository reportsAwsRepo,
-            String reportsAwsImageTag,
-            IRepository signatureAwsRepo,
-            String signatureAwsImageTag,
-            IRepository sampleRegistrationAwsRepo,
-            String sampleRegistrationAwsImageTag
+            String postgresImage,
+            String elnAwsImage,
+            String reportsAwsImage,
+            String signatureAwsImage,
+            String sampleRegistrationAwsImage
     ) {}
 }
