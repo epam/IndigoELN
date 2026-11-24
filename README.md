@@ -17,12 +17,12 @@ Indigo ELN can be run either in your own local or network machine, or in AWS clo
 
 ## Local Installation
 
-The local docker-compose stack runs the full application — frontend, backend, PostgreSQL, and Keycloak — and is the recommended setup for local development.
+The local docker-compose stack runs the full application — frontend, backend, PostgreSQL, and Keycloak — and is the recommended setup for local development. By default it pulls the released images from AWS Public Container Registry (`public.ecr.aws/m5k0g6n7/indigoeln/*`); see [Running your own build](#running-your-own-build) to run images built from source.
 
 ### Prerequisites
 
 - Docker with Docker Compose v2 (`docker compose ...`)
-- Java 25 (required for the Gradle backend build)
+- Java 25 (only if you want to build the backend from source)
 - ~4 GB of free RAM
 
 ### Running on macOS
@@ -70,12 +70,36 @@ Use to log in at `http://localhost` once the stack is up.
 ./stop.sh
 ```
 
-### Manual build (without `deploy.sh`)
+### Running your own build
+
+Every application image can be replaced through an environment variable: `POSTGRES_IMAGE`, `FRONTEND_IMAGE`, `ELN_SERVICE_IMAGE`, `REPORTS_SERVICE_IMAGE`, `SIGNATURE_SERVICE_IMAGE`, `SAMPLEREGISTRATION_SERVICE_IMAGE`.
+
+Build the backend services from source (each produces an `indigoeln/<service>:built` image) and run them:
 
 ```bash
-cd backend && ./gradlew :eln:eln-service:quarkusBuild
-cd ../deployment-compose && docker compose up --build
+cd backend
+./gradlew :eln:eln-service:assemble :reports:reports-service:assemble \
+  :signature:signature-service:assemble :sampleregistration:sampleregistration-service:assemble
+cd ../deployment-compose
+ELN_SERVICE_IMAGE=indigoeln/eln-service:built \
+REPORTS_SERVICE_IMAGE=indigoeln/reports-service:built \
+SIGNATURE_SERVICE_IMAGE=indigoeln/signature-service:built \
+SAMPLEREGISTRATION_SERVICE_IMAGE=indigoeln/sampleregistration-service:built \
+  ./deploy.sh
 ```
+
+The frontend inlines its Keycloak settings at build time, so build it with the ones the compose stack uses:
+
+```bash
+docker build -t indigoeln/frontend:built \
+  --build-arg VITE_AUTH_PROVIDER=keycloak \
+  --build-arg VITE_KEYCLOAK_URL=http://localhost:8088 \
+  --build-arg VITE_KEYCLOAK_REALM=indigo-eln \
+  --build-arg VITE_KEYCLOAK_CLIENT_ID=frontend-client \
+  frontend
+```
+
+then add `FRONTEND_IMAGE=indigoeln/frontend:built` to the variables above.
 
 
 ## Installation on AWS

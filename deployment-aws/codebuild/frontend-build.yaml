@@ -30,6 +30,25 @@ phases:
       # Reads frontend/sonar-project.properties; SONAR_HOST_URL and SONAR_TOKEN come from the
       # CodeBuild project's environment (BuildStack.java).
       - pnpm dlx @sonar/scan@5.0.0
+      # The image for the local docker-compose stack. Kept in the build phase rather than post_build,
+      # which runs even after a failed build and would publish an untested image. One command, so
+      # `set -e` covers every step: CodeBuild only sees the block's final exit status.
+      - |
+        set -eo pipefail
+        IMAGE_TAG=$(echo "$CODEBUILD_RESOLVED_SOURCE_VERSION" | cut -c 1-7)
+        aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$REGISTRY_URI"
+        # Keycloak settings are inlined by Vite at build time (src/lib/env.ts); these match the
+        # Keycloak that deployment-compose/docker-compose.yml runs. BuildKit is needed for the
+        # Dockerfile's cache mount.
+        DOCKER_BUILDKIT=1 docker build \
+          --build-arg VITE_AUTH_PROVIDER=keycloak \
+          --build-arg VITE_KEYCLOAK_URL=http://localhost:8088 \
+          --build-arg VITE_KEYCLOAK_REALM=indigo-eln \
+          --build-arg VITE_KEYCLOAK_CLIENT_ID=frontend-client \
+          -t "$FRONTEND_REPO_URI:latest" -t "$FRONTEND_REPO_URI:$IMAGE_TAG" \
+          "$CODEBUILD_SRC_DIR/frontend"
+        docker push "$FRONTEND_REPO_URI:latest"
+        docker push "$FRONTEND_REPO_URI:$IMAGE_TAG"
 artifacts:
   files:
     - '**/*'

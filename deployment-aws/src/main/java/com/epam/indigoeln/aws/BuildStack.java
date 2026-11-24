@@ -49,6 +49,9 @@ public class BuildStack extends Stack {
         Repository reportsServiceRepo = createECRRepo("ecr-reports-service", "indigoeln/reports-service");
         Repository signatureServiceRepo = createECRRepo("ecr-signature-service", "indigoeln/signature-service");
         Repository sampleRegistrationServiceRepo = createECRRepo("ecr-sampleregistration-service", "indigoeln/sampleregistration-service");
+        // The frontend built for the local compose stack, Keycloak settings baked in (frontend-build.yaml).
+        // The AWS deployment serves its frontend from S3 instead.
+        Repository frontendRepo = createECRRepo("ecr-frontend", "indigoeln/frontend");
 
         Bucket buildLogsBucket = Bucket.Builder.create(this, "build-logs-bucket")
                 .build();
@@ -146,11 +149,14 @@ public class BuildStack extends Stack {
                 , buildLogsBucket
                 , null
                 , mapOf(
-                        entry("SONAR_HOST_URL", sonarHostUrl)
+                        entry("SONAR_HOST_URL", sonarHostUrl),
+                        entry("REGISTRY_URI", frontendRepo.getRegistryUri()),
+                        entry("FRONTEND_REPO_URI", frontendRepo.getRepositoryUri())
                 )
                 , sonarSecretEnvironment
         );
         sonarTokenSecret.grantRead(frontendBuild);
+        frontendRepo.grantPullPush(frontendBuild);
     }
 
     private Project createBuild(String id, String projectName, String buildSpecFile, Bucket buildLogsBucket, @Nullable PolicyStatement policy, Map<String, String> environment, Map<String, BuildEnvironmentVariable> secretEnvironment) {

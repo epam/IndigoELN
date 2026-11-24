@@ -8,6 +8,7 @@ import org.testcontainers.containers.wait.strategy.Wait;
 
 import java.io.File;
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -20,14 +21,18 @@ public class ComposeRunner {
     private final String[] services;
 
     public ComposeRunner(File composeFile, String... services) {
+        this(composeFile, Map.of(), services);
+    }
+
+    public ComposeRunner(File composeFile, Map<String, String> env, String... services) {
+        Map<String, String> composeEnv = new HashMap<>(env);
+        composeEnv.put("QUARKUS_PROFILE", "integration-test");
         ComposeContainer container = new ComposeContainer(composeFile)
                 .withBuild(true)
                 .withPull(false)
                 .withRemoveVolumes(true)
                 .withTailChildContainers(true)
-                .withEnv(Map.of(
-                        "QUARKUS_PROFILE", "integration-test"
-                ));
+                .withEnv(composeEnv);
         for (String service : services) {
             container = container
                     .waitingFor(service, Wait.forHealthcheck().withStartupTimeout(Duration.ofMinutes(1)))

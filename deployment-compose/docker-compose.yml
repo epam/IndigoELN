@@ -32,12 +32,8 @@ x-service-default-env: &service-default-env
 services:
 
   postgres:
-    image: "indigoeln/postgres-combined:built"
+    image: "${POSTGRES_IMAGE:-public.ecr.aws/m5k0g6n7/indigoeln/postgres-combined:3.0.0}"
     platform: linux/amd64
-    build:
-      context: ./../postgres
-      dockerfile: Dockerfile
-      target: combined
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -54,15 +50,10 @@ services:
       start_interval: 1s
 
   frontend:
-    image: "indigoeln/frontend:built"
-    build:
-      context: ./../frontend
-      dockerfile: Dockerfile
-      args:
-        VITE_AUTH_PROVIDER: keycloak
-        VITE_KEYCLOAK_URL: http://localhost:8088
-        VITE_KEYCLOAK_REALM: indigo-eln
-        VITE_KEYCLOAK_CLIENT_ID: frontend-client
+    # Keycloak settings are baked in at build time: VITE_AUTH_PROVIDER=keycloak,
+    # VITE_KEYCLOAK_URL=http://localhost:8088, VITE_KEYCLOAK_REALM=indigo-eln,
+    # VITE_KEYCLOAK_CLIENT_ID=frontend-client (see deployment-aws/codebuild/frontend-build.yaml).
+    image: "${FRONTEND_IMAGE:-public.ecr.aws/m5k0g6n7/indigoeln/frontend:3.0.0}"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/"]
       interval: 10s
@@ -72,10 +63,7 @@ services:
 
   eln-service:
     <<: *service-defaults
-    image: "indigoeln/eln-service:built"
-    build:
-      context: ./../backend/eln/eln-service
-      dockerfile: src/main/docker/Dockerfile.jvm
+    image: "${ELN_SERVICE_IMAGE:-public.ecr.aws/m5k0g6n7/indigoeln/eln-service:3.0.0}"
     environment:
       <<: *service-default-env
       QUARKUS_DATASOURCE_JDBC_URL: "jdbc:postgresql://postgres:5432/eln"
@@ -97,10 +85,7 @@ services:
 
   reports-service:
     <<: *service-defaults
-    image: "indigoeln/reports-service:built"
-    build:
-      context: ./../backend/reports/reports-service
-      dockerfile: src/main/docker/Dockerfile.jvm
+    image: "${REPORTS_SERVICE_IMAGE:-public.ecr.aws/m5k0g6n7/indigoeln/reports-service:3.0.0}"
     environment:
       <<: *service-default-env
       QUARKUS_LOG_CONSOLE_FORMAT: "[REPORTS] %d{HH:mm:ss} %-5p [%c{2.}] (%t) %s%e%n"
@@ -110,10 +95,7 @@ services:
 
   signature-service:
     <<: *service-defaults
-    image: "indigoeln/signature-service:built"
-    build:
-      context: ./../backend/signature/signature-service
-      dockerfile: src/main/docker/Dockerfile.jvm
+    image: "${SIGNATURE_SERVICE_IMAGE:-public.ecr.aws/m5k0g6n7/indigoeln/signature-service:3.0.0}"
     environment:
       <<: *service-default-env
       QUARKUS_DATASOURCE_JDBC_URL: "jdbc:postgresql://postgres:5432/signature"
@@ -133,11 +115,8 @@ services:
 
   sampleregistration-service:
     <<: *service-defaults
-    image: "indigoeln/sampleregistration-service:built"
+    image: "${SAMPLEREGISTRATION_SERVICE_IMAGE:-public.ecr.aws/m5k0g6n7/indigoeln/sampleregistration-service:3.0.0}"
     platform: linux/amd64
-    build:
-      context: ./../backend/sampleregistration/sampleregistration-service
-      dockerfile: src/main/docker/Dockerfile.jvm
     environment:
       <<: *service-default-env
       QUARKUS_DATASOURCE_JDBC_URL: "jdbc:postgresql://postgres:5432/sampleregistration"
