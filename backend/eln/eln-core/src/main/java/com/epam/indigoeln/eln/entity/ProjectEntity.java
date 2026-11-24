@@ -1,0 +1,146 @@
+package com.epam.indigoeln.eln.entity;
+
+import com.epam.indigoeln.eln.config.hibernate.ExperimentCountArrayType;
+import com.epam.indigoeln.eln.common.config.SearchVectorType;
+import com.epam.indigoeln.eln.model.AccessLevel;
+import com.epam.indigoeln.eln.model.ExperimentStatus;
+import com.epam.indigoeln.eln.common.util.SearchVector;
+import jakarta.persistence.*;
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.NamedEntityGraph;
+import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
+import lombok.*;
+import org.hibernate.annotations.*;
+import org.hibernate.dialect.type.PostgreSQLEnumJdbcType;
+import org.jspecify.annotations.Nullable;
+
+import java.util.*;
+
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@ToString(of = {"id", "name"}, includeFieldNames = false)
+@Entity(name = "Project")
+@SecondaryTable(name = "Project_Access_View",
+        pkJoinColumns = @PrimaryKeyJoinColumn(name = "project_id", referencedColumnName = "id")
+)
+@NamedEntityGraph(
+        name = "Project.list",
+        attributeNodes = {
+                @NamedAttributeNode("createdBy"),
+                @NamedAttributeNode("modifiedBy"),
+                @NamedAttributeNode("notebookCount"),
+                @NamedAttributeNode("experimentCount")
+        }
+)
+@NamedEntityGraph(
+        name = "Project.details",
+        attributeNodes = {
+                @NamedAttributeNode("createdBy"),
+                @NamedAttributeNode("modifiedBy"),
+                @NamedAttributeNode("notebookCount"),
+                @NamedAttributeNode("experimentCount"),
+                @NamedAttributeNode("currentAccessOrNull")
+        }
+)
+@NamedEntityGraph(
+        name = "Project.withACL",
+        attributeNodes = {
+                @NamedAttributeNode("aclEntities"),
+                @NamedAttributeNode("implicitUsers"),
+                @NamedAttributeNode("notebooks")
+        }
+)
+@DynamicUpdate
+public class ProjectEntity extends BaseEntity implements WithAttachments<ProjectAttachment>, WithACL<ProjectACLEntity, ProjectEntity>, WithRevision {
+
+    @NotEmpty(message = "Project Name is required")
+    @Size(max = 256, message = "Project name must be at most 256 characters")
+    private String name;
+
+    @NotNull
+    private Integer revision;
+
+    @Nullable
+    @Basic(fetch = FetchType.LAZY)
+    private String literature;
+
+    @Nullable
+    @Basic(fetch = FetchType.LAZY)
+    private String description;
+
+    @NotNull
+    @Basic(fetch = FetchType.LAZY)
+    @LazyGroup("searchVector")
+    @Type(SearchVectorType.class)
+    @Column(name = "search_vector", columnDefinition = "tsvector")
+    @ColumnTransformer(write = "calculate_tsvector(?)")
+    private SearchVector searchVector;
+
+    @NotNull
+    @OneToMany(mappedBy = "project", cascade = CascadeType.ALL, orphanRemoval = true)
+    @MapKeyJoinColumn(name = "user_id")
+    private Map<UserEntity, ProjectACLEntity> aclEntities = HashMap.newHashMap(0);
+
+    @NotNull
+    @ManyToMany
+    @JoinTable(name = "Project_Implicit_Access", joinColumns = @JoinColumn(name = "project_id"), inverseJoinColumns = @JoinColumn(name = "user_id"))
+    private Set<UserEntity> implicitUsers = HashSet.newHashSet(0);
+
+    @NotNull
+    @ElementCollection
+    @CollectionTable(name = "project_keyword", joinColumns = @JoinColumn(name = "project_id"))
+    @Column(name = "keyword", nullable = false)
+    private Set<String> keywords = HashSet.newHashSet(0);
+
+    @NotNull
+    @OneToMany(mappedBy = "project")
+    private Set<NotebookEntity> notebooks = HashSet.newHashSet(0);
+
+    @NotNull
+    @OneToMany(mappedBy = "project")
+    private Set<ExperimentEntity> experiments = HashSet.newHashSet(0);
+
+    @NotNull
+    @OneToMany(mappedBy = "parent")
+    @OrderBy("createdAt")
+    private List<ProjectAttachment> attachments = new ArrayList<>(0);
+
+    @Basic(fetch = FetchType.LAZY)
+    @Column(insertable = false, updatable = false)
+    private Integer notebookCount;
+
+    @NotNull
+    @Basic(fetch = FetchType.LAZY)
+    @Column(insertable = false, updatable = false)
+    @Type(ExperimentCountArrayType.class)
+    private Map<ExperimentStatus, Integer> experimentCount = Map.of();
+
+    @Nullable
+    @Basic(fetch = FetchType.LAZY)
+    @Column(table = "Project_Access_View", insertable = false, updatable = false)
+    @JdbcType(PostgreSQLEnumJdbcType.class)
+    @Fetch(FetchMode.SELECT)
+    @LazyGroup("access_view")
+    private AccessLevel currentAccessOrNull;
+
+    @Override
+    public void insertACL(UserEntity user, AccessLevel access) {
+        getAclEntities().put(user, new ProjectACLEntity(this, user, access));
+    }
+
+    @Override
+    @Nullable
+    @Transient
+    public ProjectEntity getACLParent() {
+        return null;
+    }
+
+    @Transient
+    public AccessLevel getCurrentAccess() {
+        return currentAccessOrNull != null ? currentAccessOrNull : AccessLevel.NONE;
+    }
+}

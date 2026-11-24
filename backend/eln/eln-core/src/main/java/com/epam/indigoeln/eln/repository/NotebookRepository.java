@@ -1,0 +1,156 @@
+package com.epam.indigoeln.eln.repository;
+
+import com.epam.indigoeln.common.exception.EntityNotFoundException;
+import com.epam.indigoeln.common.model.Page;
+import com.epam.indigoeln.common.model.Paging;
+import com.epam.indigoeln.common.model.SortOrder;
+import com.epam.indigoeln.eln.common.repository.BaseRepository;
+import com.epam.indigoeln.eln.entity.NotebookEntity;
+import com.epam.indigoeln.eln.entity.NotebookEntity_;
+import com.epam.indigoeln.eln.entity.NotebookRevisionEntity;
+import com.epam.indigoeln.eln.entity.ProjectEntity;
+import com.epam.indigoeln.eln.entity.ProjectEntity_;
+import com.epam.indigoeln.eln.entity.UserEntity;
+import com.epam.indigoeln.eln.mapper.NotebookMapper;
+import com.epam.indigoeln.eln.model.ApplicationPermission;
+import com.epam.indigoeln.eln.model.NotebookDTO;
+import com.epam.indigoeln.eln.service.ACLService;
+import com.epam.indigoeln.eln.util.ELNCriteriaConditions;
+import com.google.common.base.MoreObjects;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import jakarta.persistence.Tuple;
+import jakarta.ws.rs.QueryParam;
+import org.hibernate.query.criteria.CriteriaDefinition;
+import org.hibernate.query.criteria.JpaRoot;
+import org.jspecify.annotations.Nullable;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
+
+import static com.epam.indigoeln.common.util.ModelUtil.map;
+
+@ApplicationScoped
+public class NotebookRepository extends BaseRepository<NotebookEntity> {
+
+    private static final String NOTEBOOK = "notebook";
+
+    @Inject
+    NotebookMapper notebookMapper;
+    @Inject
+    ACLService aclService;
+    @Inject
+    ELNCriteriaConditions.Factory criteriaConditionsFactory;
+
+    public NotebookRepository() {
+        super(NotebookEntity.class);
+    }
+
+    public Page<NotebookDTO> findAll(UUID projectId, @Nullable String search, @QueryParam("sort") @Nullable SortOrder sort, @Nullable UserEntity createdByUser, Paging paging, boolean showAll) {
+        CriteriaDefinition<Tuple> criteria = new CriteriaDefinition<>(em, Tuple.class) {{
+            JpaRoot<NotebookEntity> root = from(NotebookEntity.class);
+            select(tuple(root.id(), count(literal(1), createWindow())));
+            criteriaConditionsFactory.withConditions(this::where, conditions -> {
+                if (!showAll) {
+                    conditions.add(isNotNull(root.get(NotebookEntity_.currentAccessOrNull)));
+                }
+                conditions.add(root.get(NotebookEntity_.project).get(ProjectEntity_.id).equalTo(projectId));
+                if (createdByUser != null) {
+                    conditions.add(root.get(NotebookEntity_.createdBy).equalTo(createdByUser));
+                }
+                conditions.fullTextSearch(root.get(NotebookEntity_.searchVector), search, root.get(NotebookEntity_.name));
+            });
+            orderBy(switch (MoreObjects.firstNonNull(sort, SortOrder.LATEST)) {
+                case EARLIEST -> asc(root.get(NotebookEntity_.modifiedAt));
+                case LATEST -> desc(root.get(NotebookEntity_.modifiedAt));
+            });
+        }};
+
+        Page<NotebookEntity> page = doFindWithTotals(
+                criteria,
+                paging,
+                em.getEntityGraph("Notebook.list")
+        );
+
+        return map(page, notebookMapper::entityToDTO);
+    }
+
+    public NotebookEntity load(UUID id) {
+        NotebookEntity notebook = doLoad(id, em.getEntityGraph("Notebook.details"));
+        aclService.ensureAccess(notebook, ApplicationPermission.VIEW_NOTEBOOKS);
+        return notebook;
+    }
+
+    public NotebookEntity loadWithACL(UUID id) {
+        return doLoad(id, em.getEntityGraph("Notebook.withACL"));
+    }
+
+    public void lock(UUID id) {
+        // See ProjectRepository.lock for the reasoning
+        List<?> locked = em.createNativeQuery("select id from Notebook where id = ?1 for no key update")
+                .setParameter(1, id)
+                .getResultList();
+        if (locked.isEmpty()) {
+            throw new EntityNotFoundException("Notebook", id);
+        }
+    }
+
+    public NotebookEntity loadAndLock(UUID id) {
+        lock(id);
+        return load(id);
+    }
+
+    public List<NotebookEntity> findByProjectWithACLEntities(ProjectEntity project) {
+        //noinspection unchecked
+        List<UUID> ids = em.createNativeQuery("select id from Notebook where project_id = ?1 for no key update", UUID.class)
+                .setParameter(1, project.getId())
+                .getResultList();
+        return doFindByIDs(ids, em.getEntityGraph("Notebook.withACL"));
+    }
+
+    public boolean existsByName(String name) {
+        CriteriaDefinition<Integer> criteria = new CriteriaDefinition<>(em, Integer.class) {{
+            JpaRoot<NotebookEntity> root = from(NotebookEntity.class);
+            select(literal(1));
+            where(root.get(NotebookEntity_.name).equalTo(name));
+        }};
+        return doExists(criteria);
+    }
+
+    public @Nullable String getLastNotebookName() {
+        List<@Nullable String> found = em.createQuery("select max(name) from Notebook", String.class).getResultList();
+        return found.isEmpty() ? null : found.getFirst();
+    }
+
+    public UUID getProjectID(UUID notebookID) {
+        return em.createQuery("select project.id from Notebook where id = ?1", UUID.class)
+                .setParameter(1, notebookID)
+                .getSingleResult();
+    }
+
+    public void persistRevision(NotebookRevisionEntity revision) {
+        em.persist(revision);
+    }
+
+    public NotebookRevisionEntity getRevision(NotebookEntity notebook, int revision) {
+        return em.createQuery("from NotebookRevision where notebook = :notebook and revision = :revision", NotebookRevisionEntity.class)
+                .setParameter(NOTEBOOK, notebook)
+                .setParameter("revision", revision)
+                .getSingleResult();
+    }
+
+    public List<NotebookRevisionEntity> findRecentRevisions(NotebookEntity notebook, Duration period) {
+        return em.createQuery("from NotebookRevision where notebook=:notebook and datetime>=:since order by revision", NotebookRevisionEntity.class)
+                .setParameter(NOTEBOOK, notebook)
+                .setParameter("since", Instant.now().minus(period))
+                .getResultList();
+    }
+
+    public List<NotebookRevisionEntity> getRevisions(NotebookEntity notebook) {
+        return em.createQuery("from NotebookRevision where notebook=:notebook order by revision", NotebookRevisionEntity.class)
+                .setParameter(NOTEBOOK, notebook)
+                .getResultList();
+    }
+}

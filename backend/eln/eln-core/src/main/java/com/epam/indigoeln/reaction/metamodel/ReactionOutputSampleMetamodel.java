@@ -1,0 +1,99 @@
+package com.epam.indigoeln.reaction.metamodel;
+
+import com.epam.indigoeln.common.model.NbkBatchNumber;
+import com.epam.indigoeln.common.model.units.DensityUnit;
+import com.epam.indigoeln.common.model.units.MolUnit;
+import com.epam.indigoeln.common.model.units.MolarityUnit;
+import com.epam.indigoeln.common.model.units.NoUnit;
+import com.epam.indigoeln.common.model.units.VolumeUnit;
+import com.epam.indigoeln.common.model.units.WeightUnit;
+import com.epam.indigoeln.eln.model.ComponentStateRef;
+import com.epam.indigoeln.eln.model.CompoundProtectionRef;
+import com.epam.indigoeln.eln.model.HandlingPrecautionsRef;
+import com.epam.indigoeln.eln.model.HealthHazardRef;
+import com.epam.indigoeln.eln.model.SampleSourceDetailsRef;
+import com.epam.indigoeln.eln.model.SampleSourceRef;
+import com.epam.indigoeln.eln.model.StorageInstructionsRef;
+import com.epam.indigoeln.reaction.metamodel.property.Metamodel;
+import com.epam.indigoeln.reaction.metamodel.property.ModelProperty;
+import com.epam.indigoeln.reaction.model.EnteredValue;
+import com.epam.indigoeln.reaction.model.OutputSampleAnchor;
+import com.epam.indigoeln.reaction.model.ReactionOutputSample;
+import com.epam.indigoeln.reaction.model.SampleRegistrationStatus;
+import com.epam.indigoeln.reaction.model.outputsample.ExternalSupplier;
+import com.epam.indigoeln.reaction.model.outputsample.MeltingPoint;
+import com.epam.indigoeln.reaction.model.outputsample.PurityCalculation;
+import com.epam.indigoeln.reaction.model.outputsample.ResidualSolvent;
+import com.epam.indigoeln.reaction.model.outputsample.SolubidityInSolvent;
+import org.jspecify.annotations.Nullable;
+
+import java.util.List;
+import java.util.Set;
+
+import static com.epam.indigoeln.reaction.metamodel.property.ModelProperty.enteredValueProperty;
+import static com.epam.indigoeln.reaction.metamodel.property.ModelProperty.property;
+
+public class ReactionOutputSampleMetamodel {
+
+    private ReactionOutputSampleMetamodel() {
+    }
+
+    // ReactionSample
+    public static final ModelProperty<ReactionOutputSample, EnteredValue<DensityUnit>> DENSITY = enteredValueProperty("density", ReactionOutputSample::getDensity, ReactionOutputSample::setDensity);
+    public static final ModelProperty<ReactionOutputSample, EnteredValue<MolarityUnit>> MOLARITY = enteredValueProperty("molarity", ReactionOutputSample::getMolarity, ReactionOutputSample::setMolarity);
+    public static final ModelProperty<ReactionOutputSample, EnteredValue<VolumeUnit>> VOLUME = enteredValueProperty("volume", ReactionOutputSample::getVolume, ReactionOutputSample::setVolume);
+    public static final ModelProperty<ReactionOutputSample, EnteredValue<NoUnit>> PURITY = enteredValueProperty("purity", ReactionOutputSample::getPurity, ReactionOutputSample::setPurity, EnteredValue.DEFAULT_ONE_HUNDRED);
+    public static final ModelProperty<ReactionOutputSample, @Nullable String> SAMPLE_KEY = property("sampleKey", ReactionOutputSample::getSampleKey, ReactionOutputSample::setSampleKey);
+    public static final ModelProperty<ReactionOutputSample, Set<HealthHazardRef>> HEALTH_HAZARDS = property("healthHazards", ReactionOutputSample::getHealthHazards, ReactionOutputSample::setHealthHazards);
+    // ReactionInputSample
+    public static final ModelProperty<ReactionOutputSample, OutputSampleAnchor> ANCHOR = property("anchor", ReactionOutputSample::getAnchor, null);
+    public static final ModelProperty<ReactionOutputSample, NbkBatchNumber> NBK_BATCH_NUMBER = property("nbkBatchNumber", ReactionOutputSample::getNbkBatchNumber, null);
+    public static final ModelProperty<ReactionOutputSample, EnteredValue<MolUnit>> ACTUAL_MOL = enteredValueProperty("actualMol", ReactionOutputSample::getActualMol, ReactionOutputSample::setActualMol);
+    public static final ModelProperty<ReactionOutputSample, EnteredValue<WeightUnit>> ACTUAL_WEIGHT = enteredValueProperty("actualWeight", ReactionOutputSample::getActualWeight, ReactionOutputSample::setActualWeight);
+    public static final ModelProperty<ReactionOutputSample, EnteredValue<NoUnit>> YIELD = enteredValueProperty("yield", ReactionOutputSample::getYieldValue, ReactionOutputSample::setYieldValue);
+    public static final ModelProperty<ReactionOutputSample, @Nullable SampleRegistrationStatus> REGISTRATION_STATUS = property("registrationStatus", ReactionOutputSample::getRegistrationStatus, ReactionOutputSample::setRegistrationStatus);
+    public static final ModelProperty<ReactionOutputSample, @Nullable String> REGISTRATION_STATUS_MESSAGE = property("registrationStatusMessage", ReactionOutputSample::getRegistrationStatusMessage, ReactionOutputSample::setRegistrationStatusMessage);
+    public static final ModelProperty<ReactionOutputSample, List<HandlingPrecautionsRef>> HANDLING_PRECAUTIONS = property("handlingPrecautions", ReactionOutputSample::getHandlingPrecautions, ReactionOutputSample::setHandlingPrecautions);
+    public static final ModelProperty<ReactionOutputSample, List<StorageInstructionsRef>> STORAGE_INSTRUCTIONS = property("storageInstructions", ReactionOutputSample::getStorageInstructions, ReactionOutputSample::setStorageInstructions);
+    public static final ModelProperty<ReactionOutputSample, List<CompoundProtectionRef>> COMPOUND_PROTECTION = property("compoundProtection", ReactionOutputSample::getCompoundProtection, ReactionOutputSample::setCompoundProtection);
+    public static final ModelProperty<ReactionOutputSample, List<SolubidityInSolvent>> SOLUBILITY_IN_SOLVENTS = property("solubilityInSolvents", ReactionOutputSample::getSolubilityInSolvents, ReactionOutputSample::setSolubilityInSolvents);
+    public static final ModelProperty<ReactionOutputSample, List<ResidualSolvent>> RESIDUAL_SOLVENTS = property("residualSolvents", ReactionOutputSample::getResidualSolvents, ReactionOutputSample::setResidualSolvents);
+    public static final ModelProperty<ReactionOutputSample, @Nullable MeltingPoint> MELTING_POINT = property("meltingPoint", ReactionOutputSample::getMeltingPoint, ReactionOutputSample::setMeltingPoint);
+    public static final ModelProperty<ReactionOutputSample, List<PurityCalculation>> PURITY_CALCULATIONS = property("purityCalculations", ReactionOutputSample::getPurityCalculations, ReactionOutputSample::setPurityCalculations);
+    public static final ModelProperty<ReactionOutputSample, @Nullable ExternalSupplier> EXTERNAL_SUPPLIER = property("externalSupplier", ReactionOutputSample::getExternalSupplier, ReactionOutputSample::setExternalSupplier);
+    public static final ModelProperty<ReactionOutputSample, @Nullable SampleSourceRef> SOURCE = property("source", ReactionOutputSample::getSource, ReactionOutputSample::setSource);
+    public static final ModelProperty<ReactionOutputSample, @Nullable SampleSourceDetailsRef> SOURCE_DETAILS = property("sourceDetails", ReactionOutputSample::getSourceDetails, ReactionOutputSample::setSourceDetails);
+    public static final ModelProperty<ReactionOutputSample, @Nullable ComponentStateRef> COMPONENT_STATE = property("componentState", ReactionOutputSample::getComponentState, ReactionOutputSample::setComponentState);
+    public static final ModelProperty<ReactionOutputSample, @Nullable String> BATCH_COMMENT = property("batchComment", ReactionOutputSample::getBatchComment, ReactionOutputSample::setBatchComment);
+    public static final ModelProperty<ReactionOutputSample, @Nullable String> STRUCTURE_COMMENT = property("structureComment", ReactionOutputSample::getStructureComment, ReactionOutputSample::setStructureComment);
+    
+    public static final Metamodel<ReactionOutputSample> INSTANCE = new Metamodel<>("ReactionOutputSample", List.of(
+            DENSITY,
+            MOLARITY,
+            VOLUME,
+            PURITY,
+            SAMPLE_KEY,
+            HEALTH_HAZARDS,
+            ANCHOR,
+            NBK_BATCH_NUMBER,
+            ACTUAL_MOL,
+            ACTUAL_WEIGHT,
+            YIELD,
+            REGISTRATION_STATUS,
+            REGISTRATION_STATUS_MESSAGE,
+            SAMPLE_KEY,
+            HANDLING_PRECAUTIONS,
+            STORAGE_INSTRUCTIONS,
+            COMPOUND_PROTECTION,
+            SOLUBILITY_IN_SOLVENTS,
+            RESIDUAL_SOLVENTS,
+            MELTING_POINT,
+            PURITY_CALCULATIONS,
+            EXTERNAL_SUPPLIER,
+            SOURCE,
+            SOURCE_DETAILS,
+            COMPONENT_STATE,
+            BATCH_COMMENT,
+            STRUCTURE_COMMENT
+    ));
+}

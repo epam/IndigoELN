@@ -1,0 +1,277 @@
+package com.epam.indigoeln.eln.util;
+
+import com.epam.indigoeln.compound.service.CompoundService;
+import com.epam.indigoeln.eln.indigowrapper.IndigoAPI;
+import com.epam.indigoeln.eln.indigowrapper.IndigoReaction;
+import com.epam.indigoeln.eln.indigowrapper.IndigoRendererAPI;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.NullNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.ValueNode;
+import com.google.common.base.Preconditions;
+import jakarta.enterprise.context.Dependent;
+import jakarta.inject.Inject;
+import one.util.streamex.StreamEx;
+import org.jspecify.annotations.Nullable;
+
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+
+@Dependent
+public class PatchFormatter {
+
+    private static final String SOURCE = "source";
+    private static final String VALUE = "value";
+    private static final Map<String, String> ENTERED_VALUE_SOURCES = Map.of(
+            "F", "fixed",
+            "D", "default",
+            "C", "calculated",
+            "U", "user-entered",
+            "L", "user-entered"
+    );
+    private static final Set<String> ENTERED_VALUE_FIELDS = Set.of(VALUE, SOURCE, "exact", "revision");
+
+    @Inject
+    IndigoAPI indigo;
+    @Inject
+    IndigoRendererAPI indigoRenderer;
+    @Inject
+    CompoundService compoundService;
+    @Inject
+    JSONPatcher jsonPatcher;
+
+    private final GridBuilder grid = new GridBuilder(16);
+    private final List<String> path = new ArrayList<>();
+
+    public String format(JsonNode before, JsonNode patch) {
+        doFormat(before, patch, null);
+        return grid.build();
+    }
+
+    private String formatScalar(@Nullable JsonNode node) {
+        if (node == null || node instanceof NullNode) {
+            return "null";
+        }
+        String value = node.asText();
+        if (!path.isEmpty()) {
+            return switch (path.getLast()) {
+                case "rxnfile" -> generateRxnfileImage(value);
+                case "compoundID" -> generateCompoundImage(UUID.fromString(value));
+                default -> value;
+            };
+        }
+        return value;
+    }
+
+    private void doFormat(@Nullable JsonNode before, JsonNode patch, @Nullable Boolean newOrOld) {
+        String nestedClass = newOrOld == null ? "" : newOrOld ? " new" : " old";
+        switch (patch) {
+            case ObjectNode objectPatch when (objectPatch.get("$old") instanceof ValueNode || objectPatch.get("$new") instanceof ValueNode) -> {
+                // patch: old-new if old/new are scalars -> show inline
+                String oldValue = formatScalar(objectPatch.get("$old"));
+                String newValue = formatScalar(objectPatch.get("$new"));
+                String s = "<span class='old'>%s</span> → <span class='new'>%s</span>".formatted(oldValue, newValue);
+                grid.right(s).left().newRow();
+            }
+            case ObjectNode objectPatch when (objectPatch.has("$old") || objectPatch.has("$new")) -> {
+                // patch: old-new if old/new are not scalars -> set oldOrNew, nest into old and new
+                if (objectPatch.has("$old")) {
+                    doFormat(before, objectPatch.get("$old"), false);
+                }
+                if (objectPatch.has("$new")) {
+                    doFormat(before, objectPatch.get("$new"), true);
+                }
+            }
+            case ObjectNode objectPatch when isEnteredValue(objectPatch) -> {
+                // EnteredValue created or deleted
+                String s = formatEnteredValue(newOrOld != null ? newOrOld : before == null, objectPatch);
+                grid.right(s).left().newRow();
+            }
+            case ObjectNode _ when isEnteredValue(before) -> {
+                // EnteredValue changed
+                JsonNode after = jsonPatcher.apply(before, patch);
+                String s = "%s → %s".formatted(
+                        formatEnteredValue(false, before),
+                        formatEnteredValue(true, after)
+                );
+                grid.right(s).left().newRow();
+            }
+            case ObjectNode objectPatch when (objectPatch.size() == 2 && objectPatch.get("id") instanceof ValueNode _ && objectPatch.get("name") instanceof ValueNode name) -> {
+                // DictionaryRef or ExperimentRef
+                String s = "<span class='%s'>%s</span>".formatted(nestedClass, name);
+                grid.right(s).left().newRow();
+            }
+            case ObjectNode objectPatch when (objectPatch.size() == 2 && objectPatch.get("username") instanceof ValueNode username && objectPatch.get("displayName") instanceof ValueNode displayName) -> {
+                // UserRef
+                String s = "<span class='%s'>%s (%s)</span>".formatted(nestedClass, displayName, username);
+                grid.right(s).left().newRow();
+            }
+            case ObjectNode objectPatch when (JSONPatcher.EXPERIMENT_LIST_PATHS.containsKey(path)) -> {
+                // list format, iterate indices
+                objectPatch.forEachEntry((key, value) -> {
+                    int[] indices = JSONPatcher.parseListKey(key);
+                    String displayPath = path.getLast();
+                    displayPath = displayPath.substring(0, displayPath.length() - 1); // remove plural "s"; should have displayName for every field instead
+                    String s = indices[0] == indices[1] ? "%d:".formatted(indices[0] + 1) // index didn't change
+                            : indices[1] == -1 ? "<span class='old'>%d</span>:<br/><span class='comment'>removed</span>".formatted(indices[0] + 1) // deleted
+                            : indices[0] == -1 ? "<span class='new'>%d</span>:<br/><span class='comment'>inserted</span>".formatted(indices[1] + 1) // inserted
+                            : "<span class='old'>%d</span> → <span class='new'>%d</span>:<br/><span class='comment'>repositioned</span>".formatted(indices[0] + 1, indices[1] + 1); // repositioned
+                    grid.left(); // overwrite collection name
+                    grid.right("<span class='key%s'>%s %s</span>".formatted(nestedClass, displayPath, s));
+                    path.add("#");
+                    JsonNode node = before != null ? before.get(indices[0]) : null;
+                    doFormat(node, value, newOrOld);
+                    path.removeLast();
+                    grid.newRow();
+                });
+            }
+            case ObjectNode objectPatch -> {
+                // set format or properties, iterate keys
+                objectPatch.forEachEntry((key, value) -> {
+                    path.add(key);
+                    JsonNode node = before != null ? before.get(key) : null;
+                    grid.right("<span class='key%s'>%s:</span>".formatted(nestedClass, key));
+                    doFormat(node, value, newOrOld);
+                    grid.left().newRow();
+                    path.removeLast();
+                });
+            }
+            case ArrayNode arrayPatch when (JSONPatcher.EXPERIMENT_LIST_PATHS.containsKey(path)) -> {
+                for (int i = 0; i < arrayPatch.size(); i++) {
+                    JsonNode node = arrayPatch.get(i);
+                    String displayPath = path.getLast();
+                    displayPath = displayPath.substring(0, displayPath.length() - 1); // remove plural "s"; should have displayName for every field instead
+                    grid.left(); // overwrite collection name
+                    grid.right("<span class='key%s'>%s %d<br/><span class='comment'>%s</span>".formatted(nestedClass, displayPath, i + 1, newOrOld == Boolean.TRUE ? "inserted" : "removed"));
+                    path.add("#");
+                    doFormat(null, node, newOrOld);
+                    path.removeLast();
+                    grid.newRow();
+                }
+            }
+            case ArrayNode arrayPatch -> {
+                if (arrayPatch.isEmpty()) {
+                    grid.right("<span class='%s'>[ ]</span>".formatted(nestedClass)).left().newRow();
+                } else {
+                    grid.right("<span class='%s'>[</span>".formatted(nestedClass)).left().newRow();
+                    path.add("#");
+                    for (JsonNode item : arrayPatch) {
+                        doFormat(null, item, newOrOld);
+                    }
+                    path.removeLast();
+                    grid.right("<span class='%s'>]</span>".formatted(nestedClass)).left().newRow();
+                }
+            }
+            default -> {
+                grid.right("<span class='%s'>%s</span>".formatted(nestedClass, formatScalar(patch))).left().newRow();
+            }
+        }
+    }
+
+    private static boolean isEnteredValue(@Nullable JsonNode node) {
+        return node instanceof ObjectNode object
+                && object.get(SOURCE) instanceof ValueNode source
+                && ENTERED_VALUE_SOURCES.containsKey(source.asText())
+                && StreamEx.of(object.fieldNames()).allMatch(ENTERED_VALUE_FIELDS::contains);
+    }
+
+    private static String formatEnteredValue(boolean newOrOld, @Nullable JsonNode enteredValue) {
+        if (enteredValue == null || !enteredValue.hasNonNull(VALUE) || !enteredValue.hasNonNull(SOURCE)) {
+            return "<span class='%s'>null</span>".formatted(newOrOld ? "new" : "old");
+        }
+        String value = enteredValue.get(VALUE).asText();
+        String source = ENTERED_VALUE_SOURCES.getOrDefault(enteredValue.get(SOURCE).asText(), enteredValue.get(SOURCE).asText());
+        JsonNode exactValue = enteredValue.get("exact");
+        String exactValueStr = exactValue != null ? "&ensp;(exact value %s)".formatted(exactValue.doubleValue()) : "";
+        return "<span class='%s ev-%s'>%s%s</span>&ensp;<span class='comment'>[%s]</span>".formatted(newOrOld ? "new" : "old", source, value, exactValueStr, source);
+    }
+
+    private static class GridBuilder {
+
+        private static final String TAKEN = "__taken__";
+
+        private final int columns;
+        private final List<@Nullable String[]> rows = new ArrayList<>();
+        private @Nullable String[] currentRow;
+        private int columnNo;
+        private int offset;
+
+        public GridBuilder(int columns) {
+            this.columns = columns;
+            newRow();
+        }
+
+        GridBuilder newRow() {
+            currentRow = new String[columns];
+            rows.add(currentRow);
+            columnNo = offset;
+            return this;
+        }
+
+        GridBuilder right(String value) {
+            currentRow[columnNo] = value;
+            Preconditions.checkState(++columnNo < columns);
+            offset++;
+            return this;
+        }
+
+        GridBuilder left() {
+            Preconditions.checkState(--columnNo >= 0);
+            Preconditions.checkState(--offset >= 0);
+            return this;
+        }
+
+        String build() {
+            StringBuilder sb = new StringBuilder();
+            sb.append("<table class='patch-grid'>\n");
+            rows.removeIf(row -> StreamEx.of(row).nonNull().findAny().isEmpty());
+            int height = rows.size();
+            int width = columns;
+            @Nullable String[][] grid = rows.toArray(new String[height][width]);
+            for (int y = 0; y < height; y++) {
+                sb.append("<tr>\n");
+                for (int x = 0; x < width; x++) {
+                    String value = grid[y][x];
+                    if (!TAKEN.equals(value)) {
+                        if (value == null) {
+                            // orphaned empty cell: not covered by any span, has nothing to display
+                            sb.append("<td></td>\n");
+                            continue;
+                        }
+                        int yLast = y, xLast = x;
+                        while (xLast + 1 < width && grid[y][xLast + 1] == null) {
+                            grid[y][++xLast] = TAKEN;
+                        }
+                        if (xLast == x) {
+                            while (yLast + 1 < height && grid[yLast + 1][x] == null) {
+                                grid[++yLast][x] = TAKEN;
+                            }
+                        }
+                        int ySpan = yLast - y + 1, xSpan = xLast - x + 1;
+                        sb.append("<td colspan='%d' rowspan='%d'>%s</td>\n".formatted(xSpan, ySpan, value));
+                    }
+                }
+                sb.append("</tr>\n");
+            }
+            sb.append("</table>\n");
+            return sb.toString();
+        }
+    }
+
+    private String generateRxnfileImage(String rxnfile) {
+        IndigoReaction reaction = indigo.loadReaction(rxnfile);
+        indigoRenderer.setRenderOptions("svg", 500, 200);
+        byte[] bytes = indigoRenderer.renderToBuffer(reaction);
+        return new String(bytes, StandardCharsets.UTF_8);
+    }
+
+    private String generateCompoundImage(UUID compoundID) {
+        byte[] bytes = compoundService.getCompoundPicture(compoundID);
+        return new String(bytes, StandardCharsets.UTF_8);
+    }
+}

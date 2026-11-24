@@ -1,0 +1,43 @@
+package com.epam.indigoeln.eln.model;
+
+import jakarta.validation.constraints.NotNull;
+import lombok.Getter;
+import lombok.Setter;
+import org.jspecify.annotations.Nullable;
+
+import java.util.List;
+import java.util.Set;
+
+@Getter
+@Setter
+public class ProjectDetailsDTO extends BaseProjectDTO {
+
+    @NotNull
+    Integer revision;
+
+    @NotNull
+    Set<String> keywords;
+
+    @Nullable
+    String literature;
+
+    @Nullable
+    String description;
+
+    @NotNull
+    List<AttachmentDTO> attachments;
+
+    @NotNull
+    List<ACLEntryDTO> acl;
+
+    @NotNull
+    List<ApplicationPermission> currentPermissions;
+
+    @Override
+    public String toString() {
+        return "ProjectDetailsDTO{" +
+                "id=" + getId() +
+                ", name='" + name + '\'' +
+                '}';
+    }
+}

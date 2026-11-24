@@ -1,0 +1,152 @@
+import { Toast } from '@base-ui/react/toast';
+
+import { ApiError, NetworkError } from '@/lib/api';
+import { buildReportErrorContext, INCIDENTS_PATH, openReportError } from '@/lib/report-error';
+
+/**
+ * Created outside React so the query and mutation caches can raise a toast without a hook. The
+ * provider in `__root.tsx` binds it to the rendered viewport.
+ */
+export const toastManager = Toast.createToastManager();
+
+/** The shape the backend uses for bean-validation failures. */
+interface BackendError {
+  path?: string;
+  message: string;
+}
+
+function isBackendErrorArray(body: unknown): body is BackendError[] {
+  return Array.isArray(body) && body.every((entry) => typeof entry?.message === 'string');
+}
+
+/** Title of the 401 toast; also its id, since the id is what collapses a burst of them. */
+const AUTH_FAILED = 'Authorization failed';
+
+/** The toast id every `NetworkError` shares, for the same reason. */
+const NETWORK_FAILED = 'network-failed';
+
+/**
+ * The readable part of an error body, if it has one. Worth surfacing for a 401 in
+ * particular, because the detail is the only thing separating the two very different
+ * causes: API Gateway's authorizer answers `{"message":"Unauthorized"}` when the token is
+ * missing or expired, while `APISecretFilter` answers the plain string `Invalid API
+ * secret` when the request did not arrive through CloudFront — a deployment or dev-proxy
+ * problem rather than anything the signed-in user did.
+ */
+function errorDetail(body: unknown): string | undefined {
+  if (typeof body === 'string') return body.trim() || undefined;
+  if (body !== null && typeof body === 'object' && 'message' in body && typeof body.message === 'string') {
+    return body.message.trim() || undefined;
+  }
+  return undefined;
+}
+
+/**
+ * Returns the message to show, and the line to log next to it.
+ */
+export function describeError(error: unknown, url?: string): [message: string, log: string] {
+  if (error instanceof ApiError) {
+    const log = `Server error calling ${url ?? 'the API'}: ${error.status}`;
+    if (error.status === 403) {
+      const message = "You don't have permission to perform this action";
+      return [message, `${log}: ${message}`];
+    }
+    if (error.status === 401) {
+      const detail = errorDetail(error.body);
+      return [AUTH_FAILED, `${log}: ${detail ?? AUTH_FAILED}`];
+    }
+    if (isBackendErrorArray(error.body)) {
+      const message = error.body.map((x) => (x.path ? `${x.path}: ${x.message}` : x.message)).join('\n');
+      return [message, `${log}: ${message}`];
+    }
+    return ['Server error. Please try again later', log];
+  }
+  if (error instanceof Error && error.message) {
+    return [error.message, error.message];
+  }
+  return ['Unknown error', 'Unknown error'];
+}
+
+/**
+ * Refuses something the user did, out loud: toasts `message`, then throws it. For a handler whose
+ * caller reads a rejection as "already reported" and stays silent — `StructureEditorDialog`'s
+ * `onSave` holds the sketcher open on one, drawing intact, on exactly that assumption.
+ */
+export function notifyAndThrow(message: string): never {
+  const error = new Error(message);
+  notifyError(error);
+  throw error;
+}
+
+/**
+ * Toasts a failure. Every query and mutation reports through here from its cache's `onError`
+ * (`query-client.ts`), so a call site reaches for it only for what TanStack never sees — a Ketcher
+ * error, a render.
+ *
+ * An `ApiError` carries the request it answered, which names the log line and puts a Report Error
+ * action on the toast, opening the dialog with the request attached — except a failed report,
+ * whose action would loop. With an `id`, repeats update the one toast in place.
+ */
+export function notifyError(error: unknown, id?: string): void {
+  const request = error instanceof ApiError ? error.request : undefined;
+  const report =
+    request && request.path !== INCIDENTS_PATH
+      ? buildReportErrorContext(request.path, request.method, request.json, (error as ApiError).body)
+      : undefined;
+  if (error instanceof NetworkError) id ??= NETWORK_FAILED;
+  const [message, log] = describeError(error, request?.path);
+  console.error(log, error);
+
+  if (error instanceof ApiError && error.status === 401) {
+    toastManager.add({
+      // A fixed id is the whole dedup story: Base UI updates a toast in place when one
+      // with the same id is added, so the burst of 401s a screenful of parallel queries
+      // produces reads as the single problem it is.
+      id: AUTH_FAILED,
+      title: message,
+      description: errorDetail(error.body),
+      type: 'error',
+      // No auto-dismiss: the action below is the point of this toast, and a 401 does not
+      // stop being true after five seconds.
+      timeout: 0,
+      actionProps: {
+        children: 'Reload',
+        // Reloading is enough to recover, because `_auth`'s beforeLoad guard re-runs and
+        // sends an ended session to /login. A 401 that was really a misconfigured proxy
+        // simply reports itself again, rather than bouncing the user out.
+        onClick: () => window.location.reload(),
+      },
+    });
+    return;
+  }
+
+  // With an `id`, repeats update the one toast in place — see the 401 note above.
+  const toastId = toastManager.add({
+    id,
+    title: message,
+    type: 'error',
+    ...(report && {
+      actionProps: {
+        children: 'Report Error',
+        onClick: () => {
+          toastManager.close(toastId);
+          openReportError({
+            title: `Backend error ${error instanceof ApiError ? error.status : 'unknown'}`,
+            problemDescription: message,
+            context: report,
+          });
+        },
+      },
+    }),
+  });
+}
+
+/**
+ * Toasts something the backend wants the user to know that is not a failure — the
+ * `messages` a `MutationResponse` carries, explaining what a mutation did beyond what was
+ * asked of it ("Reaction scheme updated, 2 reactants added"). There is no inline
+ * surface for these, so they are toasts.
+ */
+export function notifyInfo(message: string): void {
+  toastManager.add({ title: message });
+}

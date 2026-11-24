@@ -1,0 +1,229 @@
+package com.epam.indigoeln.eln.entity;
+
+import com.epam.indigoeln.eln.config.hibernate.ExperimentModelType;
+import com.epam.indigoeln.eln.common.config.SearchVectorType;
+import com.epam.indigoeln.eln.model.AccessLevel;
+import com.epam.indigoeln.eln.model.ExperimentStatus;
+import com.epam.indigoeln.eln.common.util.SearchVector;
+import com.epam.indigoeln.reaction.model.ExperimentModel;
+import jakarta.persistence.*;
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.NamedEntityGraph;
+import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import lombok.*;
+import org.hibernate.annotations.*;
+import org.hibernate.dialect.type.PostgreSQLEnumJdbcType;
+import org.hibernate.type.SqlTypes;
+import org.jspecify.annotations.Nullable;
+
+import java.util.*;
+
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@ToString(of = {"id", "name"}, includeFieldNames = false)
+@Entity(name = "Experiment")
+@SecondaryTable(name = "Experiment_Access_View",
+        pkJoinColumns = @PrimaryKeyJoinColumn(name = "experiment_id", referencedColumnName = "id")
+)
+@SecondaryTable(name = "Experiment_Marked_View",
+        pkJoinColumns = @PrimaryKeyJoinColumn(name = "experiment_id", referencedColumnName = "id")
+)
+@NamedEntityGraph(
+        name = "Experiment.list",
+        attributeNodes = {
+                @NamedAttributeNode("createdBy"),
+                @NamedAttributeNode("modifiedBy"),
+                @NamedAttributeNode("markedOrNull"),
+        }
+)
+@NamedEntityGraph(
+        name = "Experiment.details",
+        attributeNodes = {
+                @NamedAttributeNode("createdBy"),
+                @NamedAttributeNode("modifiedBy"),
+                @NamedAttributeNode("title"),
+                @NamedAttributeNode("description"),
+                @NamedAttributeNode("literature"),
+                @NamedAttributeNode("therapeuticArea"),
+                @NamedAttributeNode("projectCode"),
+                @NamedAttributeNode("model"),
+                @NamedAttributeNode("batchCreator"),
+                @NamedAttributeNode("linkedExperiments"),
+                @NamedAttributeNode("continuedFrom"),
+                @NamedAttributeNode("continuedTo"),
+                @NamedAttributeNode("currentAccessOrNull"),
+                @NamedAttributeNode("markedOrNull")
+        }
+)
+@NamedEntityGraph(
+        name = "Experiment.withACL",
+        attributeNodes = {
+                @NamedAttributeNode("aclEntities"),
+        }
+)
+@NamedEntityGraph(
+        name = "Experiment.forRef",
+        attributeNodes = {
+                @NamedAttributeNode("id"),
+                @NamedAttributeNode("name"),
+        }
+)
+@DynamicUpdate
+public class ExperimentEntity extends BaseEntity implements WithAttachments<ExperimentAttachment>, WithACL<ExperimentACLEntity, NotebookEntity>, WithRevision {
+
+    @NotNull
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(updatable = false)
+    private ProjectEntity project;
+
+    @NotNull
+    @ManyToOne
+    @JoinColumn(updatable = false)
+    private NotebookEntity notebook;
+
+    @NotNull
+    @ManyToOne
+    @JoinColumn(updatable = false)
+    private TemplateEntity template;
+
+    @NotEmpty
+    @Pattern(regexp = "^\\d{8}-\\d{4}$")
+    private String name;
+
+    @Nullable
+    @Basic(fetch = FetchType.LAZY)
+    private String title;
+
+    @NotNull
+    @Enumerated(EnumType.STRING)
+    @JdbcType(PostgreSQLEnumJdbcType.class)
+    private ExperimentStatus status;
+
+    @Nullable
+    @ManyToOne(fetch = FetchType.LAZY)
+    private DictionaryItemEntity therapeuticArea;
+
+    @Nullable
+    @ManyToOne(fetch = FetchType.LAZY)
+    private DictionaryItemEntity projectCode;
+
+    @Nullable
+    @Basic(fetch = FetchType.LAZY)
+    private String description;
+
+    @Nullable
+    @Basic(fetch = FetchType.LAZY)
+    private String literature;
+
+    @NotNull
+    @ManyToOne(fetch = FetchType.LAZY)
+    private UserEntity batchCreator;
+
+    @NotNull
+    @Basic(fetch = FetchType.LAZY)
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    private Set<UUID> linkedExperiments = new HashSet<>();
+
+    @NotNull
+    @Basic(fetch = FetchType.LAZY)
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    private Set<UUID> continuedFrom = new HashSet<>();
+
+    @NotNull
+    @Basic(fetch = FetchType.LAZY)
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    private Set<UUID> continuedTo = new HashSet<>();
+
+    @NotNull
+    @Basic(fetch = FetchType.LAZY)
+    @LazyGroup("searchVector")
+    @Type(SearchVectorType.class)
+    @Column(name = "search_vector", columnDefinition = "tsvector")
+    @ColumnTransformer(write = "calculate_tsvector(?)")
+    private SearchVector searchVector;
+
+    @NotNull
+    @Basic(fetch = FetchType.LAZY)
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Type(ExperimentModelType.class)
+    private ExperimentModel model;
+
+    @Basic(fetch = FetchType.LAZY)
+    private byte @Nullable [] picture;
+
+    @NotNull
+    private Boolean deleted;
+
+    @NotNull
+    private Integer revision;
+
+    @Nullable
+    private Integer version;
+
+    @NotNull
+    @OneToMany(mappedBy = "experiment", cascade = CascadeType.ALL, orphanRemoval = true)
+    @MapKeyJoinColumn(name = "user_id")
+    private Map<UserEntity, ExperimentACLEntity> aclEntities = HashMap.newHashMap(0);
+
+    @NotNull
+    @OneToMany(mappedBy = "parent")
+    @OrderBy("createdAt")
+    private List<ExperimentAttachment> attachments = new ArrayList<>(0);
+
+    @NotNull
+    @ElementCollection
+    @CollectionTable(name = "Experiment_Referenced_Compound", joinColumns = @JoinColumn(name = "experiment_id"))
+    private Set<ExperimentSearchCompound> searchCompounds = HashSet.newHashSet(0);
+
+    @NotNull
+    @ElementCollection
+    @CollectionTable(name = "Experiment_Rxnfile", joinColumns = @JoinColumn(name = "experiment_id"))
+    @Column(name = "rxnfile")
+    @OrderColumn(name = "ordinal")
+    private List<String> searchRxnfiles = new ArrayList<>(0);
+
+    @NotNull
+    @ElementCollection
+    @CollectionTable(name = "Experiment_Search_Batch", joinColumns = @JoinColumn(name = "experiment_id"))
+    private Set<ExperimentSearchBatch> searchBatches = HashSet.newHashSet(0);
+
+    @Nullable
+    @Basic(fetch = FetchType.LAZY)
+    @Column(table = "Experiment_Access_View", insertable = false, updatable = false)
+    @JdbcType(PostgreSQLEnumJdbcType.class)
+    @Fetch(FetchMode.SELECT)
+    @LazyGroup("access_view")
+    private AccessLevel currentAccessOrNull;
+
+    @Nullable
+    @Basic(fetch = FetchType.LAZY)
+    @Column(table = "Experiment_Marked_View", insertable = false, updatable = false)
+    @Fetch(FetchMode.SELECT)
+    @LazyGroup("marked_view")
+    private Boolean markedOrNull;
+
+    @Override
+    public void insertACL(UserEntity user, AccessLevel access) {
+        getAclEntities().put(user, new ExperimentACLEntity(this, user, access));
+    }
+
+    @Override
+    @Transient
+    public NotebookEntity getACLParent() {
+        return notebook;
+    }
+
+    @Transient
+    public AccessLevel getCurrentAccess() {
+        return currentAccessOrNull != null ? currentAccessOrNull : AccessLevel.NONE;
+    }
+
+    @Transient
+    public boolean isMarked() {
+        return getMarkedOrNull() == Boolean.TRUE;
+    }
+}

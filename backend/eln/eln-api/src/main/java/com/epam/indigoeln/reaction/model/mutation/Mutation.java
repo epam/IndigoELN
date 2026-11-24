@@ -1,0 +1,121 @@
+package com.epam.indigoeln.reaction.model.mutation;
+
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonSubTypes;
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
+
+@JsonTypeInfo(use = JsonTypeInfo.Id.SIMPLE_NAME, property = "type")
+@JsonSubTypes({
+        @JsonSubTypes.Type(ReactionMutation.SetScheme.class),
+        @JsonSubTypes.Type(ReactionMutation.ResolveInputs.class),
+        @JsonSubTypes.Type(ReactionMutation.AddEmptyInput.class),
+        @JsonSubTypes.Type(ReactionMutation.AddInput.class),
+        @JsonSubTypes.Type(ReactionMutation.AddNoProductSample.class),
+        @JsonSubTypes.Type(ReactionMutation.ImportSDF.class),
+
+        @JsonSubTypes.Type(ReactionInputMutation.SetInputRowRole.class),
+        @JsonSubTypes.Type(ReactionInputMutation.SetInputRowMol.class),
+        @JsonSubTypes.Type(ReactionInputMutation.SetInputRowChemicalName.class),
+        @JsonSubTypes.Type(ReactionInputMutation.SetInputRowLimiting.class),
+        @JsonSubTypes.Type(ReactionInputMutation.SetInputRowSaltCode.class),
+        @JsonSubTypes.Type(ReactionInputMutation.SetInputRowSaltEQ.class),
+        @JsonSubTypes.Type(ReactionInputMutation.SetInputRowEQ.class),
+        @JsonSubTypes.Type(ReactionInputMutation.SetInputCompoundStereoisomerCode.class),
+        @JsonSubTypes.Type(ReactionInputMutation.SetInputCompoundMolWeight.class),
+        @JsonSubTypes.Type(ReactionInputMutation.RemoveInputRow.class),
+
+        @JsonSubTypes.Type(ReactionInputSampleMutation.SetInputDensity.class),
+        @JsonSubTypes.Type(ReactionInputSampleMutation.SetInputMolarity.class),
+        @JsonSubTypes.Type(ReactionInputSampleMutation.SetInputVolume.class),
+        @JsonSubTypes.Type(ReactionInputSampleMutation.SetInputPurity.class),
+        @JsonSubTypes.Type(ReactionInputSampleMutation.SetInputHealthHazards.class),
+        @JsonSubTypes.Type(ReactionInputSampleMutation.SetInputMol.class),
+        @JsonSubTypes.Type(ReactionInputSampleMutation.SetInputWeight.class),
+        @JsonSubTypes.Type(ReactionInputSampleMutation.SetInputComment.class),
+        @JsonSubTypes.Type(ReactionInputSampleMutation.RemoveInput.class),
+
+        @JsonSubTypes.Type(ReactionOutputMutation.AddProductSample.class),
+        @JsonSubTypes.Type(ReactionOutputMutation.SetOutputRowType.class),
+        @JsonSubTypes.Type(ReactionOutputMutation.SetOutputRowSaltCode.class),
+        @JsonSubTypes.Type(ReactionOutputMutation.SetOutputRowSaltEQ.class),
+        @JsonSubTypes.Type(ReactionOutputMutation.SetOutputRowEQ.class),
+        @JsonSubTypes.Type(ReactionOutputMutation.SetOutputRowName.class),
+        @JsonSubTypes.Type(ReactionOutputMutation.SetOutputRowChemicalName.class),
+        @JsonSubTypes.Type(ReactionOutputMutation.SetOutputRowIntended.class),
+        @JsonSubTypes.Type(ReactionOutputMutation.SetOutputCompoundStereoisomerCode.class),
+        @JsonSubTypes.Type(ReactionOutputMutation.SetOutputCompoundMolWeight.class),
+
+        @JsonSubTypes.Type(ReactionOutputSampleMutation.SetOutputDensity.class),
+        @JsonSubTypes.Type(ReactionOutputSampleMutation.SetOutputMolarity.class),
+        @JsonSubTypes.Type(ReactionOutputSampleMutation.SetOutputVolume.class),
+        @JsonSubTypes.Type(ReactionOutputSampleMutation.SetOutputPurity.class),
+        @JsonSubTypes.Type(ReactionOutputSampleMutation.SetOutputHealthHazards.class),
+        @JsonSubTypes.Type(ReactionOutputSampleMutation.SetOutputActualMol.class),
+        @JsonSubTypes.Type(ReactionOutputSampleMutation.SetOutputActualWeight.class),
+        @JsonSubTypes.Type(ReactionOutputSampleMutation.RegisterSample.class),
+        @JsonSubTypes.Type(ReactionOutputSampleMutation.SetOutputHandlingPrecautions.class),
+        @JsonSubTypes.Type(ReactionOutputSampleMutation.SetOutputStorageInstructions.class),
+        @JsonSubTypes.Type(ReactionOutputSampleMutation.SetOutputCompoundProtection.class),
+        @JsonSubTypes.Type(ReactionOutputSampleMutation.SetOutputSolubilityInSolvents.class),
+        @JsonSubTypes.Type(ReactionOutputSampleMutation.SetOutputResidualSolvents.class),
+        @JsonSubTypes.Type(ReactionOutputSampleMutation.SetOutputMeltingPoint.class),
+        @JsonSubTypes.Type(ReactionOutputSampleMutation.SetOutputPurityCalculations.class),
+        @JsonSubTypes.Type(ReactionOutputSampleMutation.SetOutputExternalSupplier.class),
+        @JsonSubTypes.Type(ReactionOutputSampleMutation.SetOutputSource.class),
+        @JsonSubTypes.Type(ReactionOutputSampleMutation.SetOutputSourceDetails.class),
+        @JsonSubTypes.Type(ReactionOutputSampleMutation.SetOutputComponentState.class),
+        @JsonSubTypes.Type(ReactionOutputSampleMutation.SetOutputBatchComment.class),
+        @JsonSubTypes.Type(ReactionOutputSampleMutation.SetOutputStructureComment.class),
+        @JsonSubTypes.Type(ReactionOutputSampleMutation.RemoveProductSample.class),
+        @JsonSubTypes.Type(ReactionOutputSampleMutation.SetOutputSaltCode.class),
+        @JsonSubTypes.Type(ReactionOutputSampleMutation.SetOutputSaltEQ.class),
+        @JsonSubTypes.Type(ReactionOutputSampleMutation.SetOutputStereoisomerCode.class),
+        @JsonSubTypes.Type(ReactionOutputSampleMutation.SetOutputMolfile.class),
+
+        @JsonSubTypes.Type(ExperimentMutation.CreateExperiment.class),
+        @JsonSubTypes.Type(ExperimentMutation.SetExperimentSignificantFigures.class),
+        @JsonSubTypes.Type(ExperimentMutation.SetExperimentWeightUnit.class),
+        @JsonSubTypes.Type(ExperimentMutation.SetExperimentVolumeUnit.class),
+        @JsonSubTypes.Type(ExperimentMutation.SetExperimentMolUnit.class),
+        @JsonSubTypes.Type(ExperimentMutation.SetExperimentMolarityUnit.class),
+        @JsonSubTypes.Type(ExperimentMutation.EditExperimentAttributes.class),
+        @JsonSubTypes.Type(ExperimentMutation.EditExperimentAccess.class),
+        @JsonSubTypes.Type(ExperimentMutation.SetBatchCreator.class),
+        @JsonSubTypes.Type(ExperimentMutation.CreateExperimentAttachment.class),
+        @JsonSubTypes.Type(ExperimentMutation.DeleteExperimentAttachment.class),
+        @JsonSubTypes.Type(ExperimentMutation.CancelExperiment.class),
+        @JsonSubTypes.Type(ExperimentMutation.ReopenExperiment.class),
+        @JsonSubTypes.Type(ExperimentMutation.CompleteExperiment.class),
+        @JsonSubTypes.Type(ExperimentMutation.SubmitExperiment.class),
+        @JsonSubTypes.Type(ExperimentMutation.SignatureUpdated.class),
+        @JsonSubTypes.Type(ExperimentMutation.MakeVersion.class),
+        @JsonSubTypes.Type(ExperimentMutation.ExperimentAccessUpdated.class),
+        @JsonSubTypes.Type(ExperimentMutation.ExperimentNameUpdated.class),
+        @JsonSubTypes.Type(ExperimentMutation.Undo.class),
+        @JsonSubTypes.Type(ExperimentMutation.Redo.class),
+
+        @JsonSubTypes.Type(ProjectMutation.CreateProject.class),
+        @JsonSubTypes.Type(ProjectMutation.EditProjectAttributes.class),
+        @JsonSubTypes.Type(ProjectMutation.EditProjectAccess.class),
+        @JsonSubTypes.Type(ProjectMutation.CreateProjectAttachment.class),
+        @JsonSubTypes.Type(ProjectMutation.DeleteProjectAttachment.class),
+        @JsonSubTypes.Type(ProjectMutation.ProjectAccessUpdated.class),
+        @JsonSubTypes.Type(ProjectMutation.ProjectUndo.class),
+        @JsonSubTypes.Type(ProjectMutation.ProjectRedo.class),
+
+        @JsonSubTypes.Type(NotebookMutation.CreateNotebook.class),
+        @JsonSubTypes.Type(NotebookMutation.EditNotebookAttributes.class),
+        @JsonSubTypes.Type(NotebookMutation.EditNotebookAccess.class),
+        @JsonSubTypes.Type(NotebookMutation.CreateNotebookAttachment.class),
+        @JsonSubTypes.Type(NotebookMutation.DeleteNotebookAttachment.class),
+        @JsonSubTypes.Type(NotebookMutation.NotebookAccessUpdated.class),
+        @JsonSubTypes.Type(NotebookMutation.NotebookUndo.class),
+        @JsonSubTypes.Type(NotebookMutation.NotebookRedo.class),
+})
+public interface Mutation {
+
+    @JsonIgnore
+    default boolean isApplicableToEditSession() {
+        return false;
+    }
+}

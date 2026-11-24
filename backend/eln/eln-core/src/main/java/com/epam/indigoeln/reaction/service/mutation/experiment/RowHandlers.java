@@ -1,0 +1,35 @@
+package com.epam.indigoeln.reaction.service.mutation.experiment;
+
+import com.epam.indigoeln.eln.entity.ExperimentEntity;
+import com.epam.indigoeln.reaction.model.ExperimentModel;
+import com.epam.indigoeln.reaction.model.Reaction;
+import com.epam.indigoeln.reaction.model.ReactionInput;
+import com.epam.indigoeln.reaction.model.ReactionOutput;
+import com.epam.indigoeln.reaction.model.mutation.ReactionInputMutation;
+import com.epam.indigoeln.reaction.model.mutation.ReactionOutputMutation;
+import com.epam.indigoeln.reaction.model.EnteredValue;
+import com.epam.indigoeln.common.model.units.NoUnit;
+import com.epam.indigoeln.reaction.service.mutation.MutationHandlerFor;
+import jakarta.enterprise.context.Dependent;
+
+@Dependent
+@MutationHandlerFor(ReactionInputMutation.SetInputRowEQ.class)
+class SetInputRowEQHandler extends AbstractReactionInputMutationHandler<ReactionInputMutation.SetInputRowEQ> {
+
+    @Override
+    public String handle(ExperimentEntity experiment, ExperimentModel model, Reaction reaction, ReactionInput row, ReactionInputMutation.SetInputRowEQ mutation, ExperimentMutationContext context) {
+        setEnteredValue(row.getEq(), row::setEq, mutation.eq(), NoUnit.NO_UNIT, experiment.getRevision(), EnteredValue.DEFAULT_ONE);
+        return formatSetterSummary("input EQ", mutation.eq(), NoUnit.NO_UNIT);
+    }
+}
+
+@Dependent
+@MutationHandlerFor(ReactionOutputMutation.SetOutputRowEQ.class)
+class SetOutputRowEQHandler extends AbstractReactionOutputMutationHandler<ReactionOutputMutation.SetOutputRowEQ> {
+
+    @Override
+    public String handle(ExperimentEntity experiment, ExperimentModel model, Reaction reaction, ReactionOutput row, ReactionOutputMutation.SetOutputRowEQ mutation, ExperimentMutationContext context) {
+        setEnteredValue(row.getEq(), row::setEq, mutation.eq(), NoUnit.NO_UNIT, experiment.getRevision(), EnteredValue.DEFAULT_ONE);
+        return formatSetterSummary("output EQ", mutation.eq());
+    }
+}

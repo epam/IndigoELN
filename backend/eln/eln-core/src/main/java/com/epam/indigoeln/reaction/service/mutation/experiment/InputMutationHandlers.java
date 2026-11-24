@@ -1,0 +1,72 @@
+package com.epam.indigoeln.reaction.service.mutation.experiment;
+
+import com.epam.indigoeln.eln.entity.ExperimentEntity;
+import com.epam.indigoeln.reaction.model.ExperimentModel;
+import com.epam.indigoeln.reaction.model.Reaction;
+import com.epam.indigoeln.reaction.model.ReactionInput;
+import com.epam.indigoeln.reaction.model.mutation.ReactionInputMutation;
+import com.epam.indigoeln.reaction.service.mutation.MutationHandlerFor;
+import jakarta.enterprise.context.Dependent;
+
+import static com.epam.indigoeln.common.exception.InvalidRequestException.validate;
+
+@Dependent
+@MutationHandlerFor(ReactionInputMutation.SetInputRowLimiting.class)
+class SetInputRowLimitingHandler extends AbstractReactionInputMutationHandler<ReactionInputMutation.SetInputRowLimiting> {
+
+    @Override
+    public String handle(ExperimentEntity experiment, ExperimentModel model, Reaction reaction, ReactionInput row, ReactionInputMutation.SetInputRowLimiting mutation, ExperimentMutationContext context) {
+        reaction.setLimitingAnchor(row.getAnchor());
+        return "Change limiting input";
+    }
+}
+
+@Dependent
+@MutationHandlerFor(ReactionInputMutation.SetInputRowChemicalName.class)
+class SetInputRowChemicalNameHandler extends AbstractReactionInputMutationHandler<ReactionInputMutation.SetInputRowChemicalName> {
+
+    @Override
+    public String handle(ExperimentEntity experiment, ExperimentModel model, Reaction reaction, ReactionInput row, ReactionInputMutation.SetInputRowChemicalName mutation, ExperimentMutationContext context) {
+        row.setChemicalName(mutation.chemicalName());
+        return formatSetterSummary("input chemical name", mutation.chemicalName());
+    }
+}
+
+@Dependent
+@MutationHandlerFor(ReactionInputMutation.SetInputRowMol.class)
+class SetInputRowMolHandler extends AbstractReactionInputMutationHandler<ReactionInputMutation.SetInputRowMol> {
+
+    @Override
+    public String handle(ExperimentEntity experiment, ExperimentModel model, Reaction reaction, ReactionInput row, ReactionInputMutation.SetInputRowMol mutation, ExperimentMutationContext context) {
+        setEnteredValue(row.getMol(), row::setMol, mutation.mol(), model.getUnitSource().getMolUnit(), experiment.getRevision());
+        return formatSetterSummary("input mol", mutation.mol(), model.getUnitSource().getMolUnit());
+    }
+}
+
+@Dependent
+@MutationHandlerFor(ReactionInputMutation.SetInputRowRole.class)
+class SetInputRowRoleHandler extends AbstractReactionInputMutationHandler<ReactionInputMutation.SetInputRowRole> {
+
+    @Override
+    public String handle(ExperimentEntity experiment, ExperimentModel model, Reaction reaction, ReactionInput row, ReactionInputMutation.SetInputRowRole mutation, ExperimentMutationContext context) {
+        for (ReactionInput other : reaction.getInputs()) {
+            if (other != row) {
+                validate(other.getRole() != mutation.role() || !other.getCompound().compoundKeyEquals(row.getCompound()), "Input with the same role and compound already exists");
+            }
+        }
+
+        row.setRole(mutation.role());
+        return formatSetterSummary("input role", mutation.role());
+    }
+}
+
+@Dependent
+@MutationHandlerFor(ReactionInputMutation.RemoveInputRow.class)
+class RemoveInputRowHandler extends AbstractReactionInputMutationHandler<ReactionInputMutation.RemoveInputRow> {
+
+    @Override
+    public String handle(ExperimentEntity experiment, ExperimentModel model, Reaction reaction, ReactionInput row, ReactionInputMutation.RemoveInputRow mutation, ExperimentMutationContext context) {
+        row.delete();
+        return "Remove input";
+    }
+}

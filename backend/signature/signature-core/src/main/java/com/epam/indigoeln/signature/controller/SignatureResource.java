@@ -1,0 +1,93 @@
+package com.epam.indigoeln.signature.controller;
+
+
+import com.epam.indigoeln.common.model.Page;
+import com.epam.indigoeln.common.model.Paging;
+import com.epam.indigoeln.common.model.SortOrder;
+import com.epam.indigoeln.common.model.UploadForm;
+import com.epam.indigoeln.signature.api.SignatureAPI;
+import com.epam.indigoeln.signature.entity.DocumentEntity;
+import com.epam.indigoeln.signature.model.DocumentDTO;
+import com.epam.indigoeln.signature.model.SignForm;
+import com.epam.indigoeln.signature.model.SignatureTemplateDTO;
+import com.epam.indigoeln.signature.model.SignatureTemplateDetailsDTO;
+import com.epam.indigoeln.signature.model.SignatureTemplateRequest;
+import com.epam.indigoeln.signature.service.SignatureService;
+import io.vertx.ext.web.RoutingContext;
+import jakarta.annotation.Nullable;
+import jakarta.inject.Inject;
+import jakarta.validation.Valid;
+import jakarta.ws.rs.BeanParam;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.Context;
+import jakarta.ws.rs.core.HttpHeaders;
+import jakarta.ws.rs.core.Response;
+import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
+
+import java.nio.file.Files;
+import java.util.List;
+import java.util.UUID;
+
+import static com.epam.indigoeln.common.util.ContentDispositionUtil.generateContentDisposition;
+
+@Slf4j
+@Path(SignatureAPI.BASE_PATH)
+public class SignatureResource implements SignatureAPI {
+
+    @Inject
+    SignatureService service;
+
+    @Context
+    RoutingContext routingContext;
+
+    @Valid
+    @Override
+    public SignatureTemplateDetailsDTO createTemplate(@Valid SignatureTemplateRequest template) {
+        return service.createTemplate(template);
+    }
+
+    @Override
+    public List<@Valid SignatureTemplateDTO> getTemplates() {
+        return service.getTemplates();
+    }
+
+    @Valid
+    @Override
+    @SneakyThrows
+    public DocumentDTO uploadDocument(String name, UUID templateId, UUID sourceId, UploadForm form) {
+        return service.createDocument(templateId, name, sourceId, form.getUpload());
+    }
+
+    @Override
+    public Page<DocumentDTO> getDocuments(@QueryParam("search") @Nullable String search, @QueryParam("sort") @Nullable SortOrder sort, @QueryParam("waitingMySignature") @Nullable Boolean waitingMySignature, @BeanParam Paging paging) {
+        return service.getDocuments(search, sort, waitingMySignature, paging);
+    }
+
+    @Override
+    public DocumentDTO getDocument(UUID id) {
+        return service.getDocument(id);
+    }
+
+    @Valid
+    @Override
+    @SneakyThrows
+    public DocumentDTO signDocument(UUID documentId, SignForm form) {
+        return service.signDocument(documentId, Files.readAllBytes(form.getUpload().filePath()), form.getPassword());
+    }
+
+    @Valid
+    @Override
+    public DocumentDTO rejectDocument(UUID documentId) {
+        return service.rejectDocument(documentId);
+    }
+
+    @Override
+    public Response downloadDocument(UUID documentId) {
+        DocumentEntity document = service.getDocumentEntity(documentId);
+        return Response.ok(document.getContent())
+                .header(HttpHeaders.CONTENT_DISPOSITION, generateContentDisposition(true, document.getFilename()))
+                .build();
+    }
+}

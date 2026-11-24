@@ -1,0 +1,1143 @@
+import { http, HttpResponse } from 'msw';
+import { expect, screen, userEvent, waitFor, within } from 'storybook/test';
+
+import { StoichiometryTable } from '@/components/experiments/stoichiometry/inputs/stoichiometry-table';
+import { useExperiment } from '@/lib/api/experiments';
+import { clearColumnChoices } from '@/mocks/column-choices';
+import { makeExperimentDetails, makeReaction } from '@/mocks/fixtures';
+import { failingMutateHandlers, handlers, recalculatingMutateHandlers, slowMutateHandlers } from '@/mocks/handlers';
+
+import type { Meta, StoryObj } from '@storybook/react-vite';
+
+const EXPERIMENT = makeExperimentDetails();
+const REACTION = EXPERIMENT.model.reactions[0];
+
+/** Records the mutations that actually reached the wire, so a story can assert the payload. */
+const sent: unknown[] = [];
+
+/** Slow enough to outlast `SavingOverlay`'s 300 ms delay, so the spinner really does show. */
+const freezingHandlers = [
+  http.post('/api/eln/experiments/:id/mutate', async () => {
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    return HttpResponse.json({ patch: {} });
+  }),
+  ...handlers,
+];
+
+const spyHandlers = [
+  http.post('/api/eln/experiments/:id/mutate', async ({ request }) => {
+    sent.push(await request.json());
+    return HttpResponse.json({ patch: {} });
+  }),
+  ...handlers,
+];
+
+const meta = {
+  title: 'Experiments/Stoichiometry/Inputs/StoichiometryTable',
+  component: StoichiometryTable,
+  args: { experiment: EXPERIMENT, reaction: REACTION },
+  parameters: { layout: 'padded' },
+} satisfies Meta<typeof StoichiometryTable>;
+
+export default meta;
+type Story = StoryObj<typeof meta>;
+
+/** Five compounds, every one of them open — the batches are what the table is for. */
+export const Default: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole('columnheader', { name: 'Chem. Name' })).toBeInTheDocument();
+    // Chem. Name is editable, so it is an input carrying a value rather than text in the DOM.
+    await expect(canvas.getByRole('textbox', { name: 'Chem. Name, row 1' })).toHaveValue('Salicylic acid');
+    // A batch is named by its sample key, under the compound ID it continues.
+    await expect(canvas.getByText('STR-00000000-90-004')).toBeInTheDocument();
+    // Expanded by default: every compound shows the sample columns' header, no clicking required.
+    await expect(canvas.getAllByText('Density, g/mL')).toHaveLength(5);
+    await expect(canvas.getByRole('button', { name: 'Hide batches of row 1' })).toBeInTheDocument();
+  },
+};
+
+/** A compound's batches carry the sample columns, which are not the compound ones. */
+export const NestedRows: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getAllByText('Density, g/mL')).not.toHaveLength(0);
+    await expect(canvas.getByRole('textbox', { name: 'Comments, batch 2' })).toHaveValue(
+      'Dried over molecular sieves before use',
+    );
+  },
+};
+
+/** The chevron shuts one compound without touching the others. */
+export const Collapsed: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole('button', { name: 'Hide batches of row 2' }));
+
+    await expect(canvas.queryByRole('textbox', { name: 'Comments, batch 2' })).not.toBeInTheDocument();
+    await expect(canvas.getAllByText('Density, g/mL')).toHaveLength(4);
+    await expect(canvas.queryByText('STR-00000000-90-004')).not.toBeInTheDocument();
+  },
+};
+
+/**
+ * **The two alignment constraints**, measured rather than eyeballed.
+ *
+ * Both levels are rows of one table now, so this is really asserting that the spans in
+ * `columns.ts` put the sample cells where they are meant to go: Batch # under Compound ID, and the
+ * two delete columns ending together. Checked for *every* compound, since a per-compound drift
+ * is exactly the failure the old two-table layout had.
+ */
+export const ColumnsLineUp: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+
+    const compoundId = canvas.getByRole('columnheader', { name: 'Compound ID' });
+    const batches = canvas.getAllByRole('columnheader', { name: 'Batch #' });
+    await expect(batches).toHaveLength(5);
+    for (const batch of batches) {
+      await expect(Math.round(batch.getBoundingClientRect().left)).toBe(
+        Math.round(compoundId.getBoundingClientRect().left),
+      );
+    }
+
+    // The delete columns carry no header text, so the trailing cell of each row is the anchor.
+    const rows = canvas.getAllByRole('row');
+    const rights = rows.map((row) => {
+      const cells = row.querySelectorAll('th, td');
+      return Math.round(cells[cells.length - 1].getBoundingClientRect().right);
+    });
+    await expect(new Set(rights).size).toBe(1);
+  },
+};
+
+/**
+ * **A batch's fields past Mol line up without a grid line to hold them.** Density, Molarity and
+ * Purity share one cell with the hazards and the comment, so nothing in the table makes one
+ * batch's Density as wide as the next's — `useEqualWidths` measures them. Checked across every
+ * compound, label and value alike.
+ */
+export const SampleDetailsLineUp: Story = {
+  play: async ({ canvasElement }) => {
+    await document.fonts.ready;
+
+    for (const name of ['density', 'molarity', 'purity']) {
+      const slots = [...canvasElement.querySelectorAll(`[data-equal-width="${name}"]`)];
+      // A label per open compound and a value per batch.
+      await expect(slots.length).toBeGreaterThan(5);
+      await waitFor(() => {
+        const boxes = slots.map((slot) => {
+          const { left, width } = slot.getBoundingClientRect();
+          return `${Math.round(left)}+${Math.round(width)}`;
+        });
+        expect(new Set(boxes).size).toBe(1);
+      });
+    }
+  },
+};
+
+/**
+ * **Entering edit mode must not resize anything.** Columns are content-sized, so an editor that
+ * sat in the flow would move the column twice over: out, because a bordered input asks for more
+ * than a short label, and back in when the edited cell happened to be the
+ * widest one, because its label had left the layout. `NumericCell` lays the editor over an
+ * invisible copy of that label instead, so the cell measures the same either way.
+ *
+ * Checked on the **widest** cell of each column, which is the one that would shrink it.
+ */
+export const EditingDoesNotResizeTheColumn: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const table = canvas.getByRole('table', { name: 'Reactants, reagents and solvents' });
+    const width = (el: Element) => Math.round(el.getBoundingClientRect().width);
+
+    // Text metrics change when the webfont swaps in, which moves the table by ~24px on its own.
+    // Measuring before that lands would fail this for a reason that has nothing to do with editing.
+    await document.fonts.ready;
+
+    for (const name of ['Weight', 'Volume', 'Mol', 'Density', 'Molarity', 'Purity']) {
+      // Past Mol a batch's fields share one cell, so their labels are text rather than headers.
+      const header =
+        canvas.queryAllByRole('columnheader', { name: new RegExp(`^${name},`) })[0] ??
+        canvas.getAllByText(new RegExp(`^${name},`))[0];
+      // The widest *display* in the column — the label that holds the column open.
+      const inputs = canvas.getAllByLabelText(new RegExp(`^${name}, batch`));
+      const widest = inputs.reduce((a, b) => (width(a) >= width(b) ? a : b));
+
+      const before = { column: width(header), table: width(table) };
+      await userEvent.click(widest);
+      await expect(widest).toHaveFocus();
+
+      await expect({ column: width(header), table: width(table) }).toEqual(before);
+      await userEvent.click(document.body);
+    }
+  },
+};
+
+/**
+ * "At least the full page width", as an assertion: auto layout leaves a table narrower than its
+ * container unless something asks otherwise, and `w-full` is what asks.
+ */
+export const FillsAvailableWidth: Story = {
+  play: async ({ canvasElement }) => {
+    const table = within(canvasElement).getByRole('table', { name: 'Reactants, reagents and solvents' });
+    const scroller = table.parentElement!;
+    await expect(table.getBoundingClientRect().width).toBeGreaterThanOrEqual(scroller.clientWidth);
+  },
+};
+
+/** Nothing added yet. */
+export const Empty: Story = {
+  args: { reaction: makeReaction({ inputs: [], limitingAnchor: undefined }) },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText('No material added')).toBeInTheDocument();
+  },
+};
+
+/** The search box filters compounds, and says so when nothing matches. */
+export const Search: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.type(canvas.getByLabelText('Search materials'), 'pyridine');
+    // Pyridine is the only row left, so it is row 1 — the index column renumbers.
+    await expect(canvas.getByRole('textbox', { name: 'Chem. Name, row 1' })).toHaveValue('Pyridine');
+    await expect(canvas.queryByDisplayValue('Salicylic acid')).not.toBeInTheDocument();
+
+    await userEvent.clear(canvas.getByLabelText('Search materials'));
+    await userEvent.type(canvas.getByLabelText('Search materials'), 'zzz');
+    await expect(canvas.getByText('No material matches this search')).toBeInTheDocument();
+  },
+};
+
+/** Permission alone is one of the two gates. Without EDIT_EXPERIMENTS everything is inert. */
+export const ReadOnlyNoPermission: Story = {
+  args: { experiment: makeExperimentDetails({ currentPermissions: ['VIEW_EXPERIMENTS'] }) },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole('button', { name: 'Delete compound 1' })).toBeDisabled();
+    await expect(canvas.getByRole('button', { name: 'Add empty row' })).toBeDisabled();
+    await expect(canvas.getByRole('button', { name: 'Add sample' })).toBeDisabled();
+    // The data is all still there — read-only, not hidden.
+    await expect(canvas.getByText('Salicylic acid')).toBeInTheDocument();
+  },
+};
+
+/**
+ * Status is the **other** gate, and the one easy to forget: a completed experiment is read-only
+ * to a user who holds every permission on it.
+ */
+export const ReadOnlyCompleted: Story = {
+  args: { experiment: makeExperimentDetails({ status: 'COMPLETED' }) },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole('button', { name: 'Delete compound 1' })).toBeDisabled();
+    await expect(canvas.getByRole('button', { name: 'Significant figures' })).toBeDisabled();
+  },
+};
+
+/**
+ * Rxn Role is a `Select`, not a combobox: four fixed values and `@NotNull` on the record, so
+ * there is nothing to type into and nothing to clear. Picking one sends `SetInputRowRole`.
+ */
+export const PicksRxnRole: Story = {
+  parameters: { msw: { handlers: spyHandlers } },
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    sent.length = 0;
+    const canvas = within(canvasElement);
+
+    const role = (await canvas.findAllByLabelText('Reaction role'))[0];
+    await expect(role).toHaveTextContent('Reactant');
+    // A button holding a label, not an input holding a value — so there is nothing to type into
+    // and no ✕ to clear.
+    await expect(role.tagName).toBe('BUTTON');
+    await expect(role.querySelector('input')).toBeNull();
+
+    await userEvent.click(role);
+    await userEvent.click(await screen.findByRole('option', { name: 'Catalyst' }));
+
+    await waitFor(() => expect(sent).toEqual([{ type: 'SetInputRowRole', anchor: 'inp00001', role: 'CATALYST' }]));
+  },
+};
+
+/**
+ * Tabbing into a `cell` select opens its list, and **one more Tab moves on** — a select must not
+ * cost the row two key presses where a number costs one (see `TabOrderWalksTheRow`).
+ */
+export const TabWalksThroughASelectCell: Story = {
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const role = (await canvas.findAllByLabelText('Reaction role'))[0];
+
+    // Out and back in, so focus arrives by keyboard from another control — the only entry that opens the list.
+    role.focus();
+    await userEvent.tab({ shift: true });
+    await userEvent.tab();
+    await screen.findByRole('listbox');
+
+    await userEvent.tab();
+    await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument());
+    await expect(role).not.toHaveFocus();
+    await expect(canvasElement).toContainElement(document.activeElement as HTMLElement);
+  },
+};
+
+/**
+ * **Provenance colouring**, the thing the table exists to show: where a number came from decides
+ * how it looks. `EnteredValue.source` is `'fixed' | 'default' | 'calculated'` **or a number** —
+ * the revision a user entered it in — so "typed by a person" is `typeof source === 'number'`,
+ * not a named member.
+ *
+ * `calculated` is deliberately the *unstyled* case: it is the overwhelming majority of a
+ * recalculated table, and colouring it would leave nothing standing out. `fixed` reads the same.
+ *
+ * The last assertion is the one that earns its keep. Class names surviving is not the same as
+ * the styles reaching the page — a token renamed in `styles.css`, or a utility Tailwind never
+ * generated, would leave every cell the same colour with the markup still looking correct.
+ */
+export const ValueSourcesAreColoured: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    // The provenance classes live on the display span. It is `aria-hidden` — the input beside it
+    // carries the label — so it is reached through the cell rather than by its accessible name.
+    const display = (label: string) =>
+      canvas
+        .getByLabelText(label)
+        .closest('[data-slot="numeric-cell"]')!
+        .querySelector('[data-slot="numeric-cell-value"]')!;
+
+    const userEntered = display('Weight, batch 1');
+    const calculated = display('Mol, batch 1');
+    const fixed = display('Density, batch 2');
+    const byDefault = display('Purity, batch 3');
+
+    await expect(userEntered).toHaveClass('text-blue-400', 'font-semibold');
+    await expect(byDefault).toHaveClass('text-neutral-700', 'italic');
+    // Calculated and fixed carry no colour of their own and inherit the table's.
+    await expect(calculated.className).not.toMatch(/text-(blue|neutral)-/);
+    await expect(fixed.className).not.toMatch(/text-(blue|neutral)-/);
+
+    const colours = [userEntered, calculated, byDefault].map((el) => getComputedStyle(el).color);
+    await expect(new Set(colours).size).toBe(3);
+    await expect(getComputedStyle(fixed).color).toBe(getComputedStyle(calculated).color);
+  },
+};
+
+/**
+ * A compound's Weight and Volume are the server's sums over its batches: shown, never edited,
+ * and an em-dash when the server has none — row 2 has a batch with no volume.
+ */
+export const CompoundTotalsAreReadOnly: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const display = (label: string) =>
+      canvas
+        .getByLabelText(label)
+        .closest('[data-slot="numeric-cell"]')!
+        .querySelector('[data-slot="numeric-cell-value"]')!;
+
+    await expect(canvas.getByLabelText('Weight, row 1')).toBeDisabled();
+    await expect(display('Weight, row 1')).toHaveTextContent('676.5');
+    await expect(canvas.getByLabelText('Volume, row 2')).toBeDisabled();
+    await expect(display('Volume, row 2')).toHaveTextContent('—');
+  },
+};
+
+/**
+ * **Every control in a cell reads at the table's own size.** The shared `MultiCombobox` and `Select`
+ * default to the 14px a form wants; in a 13px table that is visibly a size larger than the text
+ * beside it, and swapping a cell into edit mode used to change the type size under the cursor.
+ * The stoichiometry cells opt into `size="sm"`.
+ *
+ * Measured rather than asserted on class names — the point is what the browser renders, and a
+ * control could pick up a size from anywhere.
+ */
+export const ControlsMatchTheTableTextSize: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const fontOf = (el: Element) => getComputedStyle(el).fontSize;
+
+    // The reference: a plain read-only cell, which is what everything should match.
+    const reference = fontOf(canvas.getAllByText('STR-00000000-89')[0]);
+
+    for (const el of [
+      canvas.getByLabelText('Weight, batch 1'), // number input
+      canvas.getByLabelText('Comments, batch 2'), // free-text cell
+      canvas.getAllByLabelText('Reaction role')[0], // Select
+      canvas.getByLabelText('Salt Code, row 3'), // DictionaryCombobox
+      canvas.getByLabelText('Hazard Comments, batch 1'), // MultiDictionaryCombobox
+    ]) {
+      await expect(fontOf(el)).toBe(reference);
+    }
+
+    // ...and the display a numeric cell swaps with, so the size does not shift on focus.
+    const display = canvas
+      .getByLabelText('Weight, batch 1')
+      .closest('[data-slot="numeric-cell"]')!
+      .querySelector('[data-slot="numeric-cell-value"]')!;
+    await expect(fontOf(display)).toBe(reference);
+  },
+};
+
+/**
+ * Salt Code is a button too — closed list, nothing to type. Like Rxn Role it is
+ * **required**: "00 - Parent Structure" stands for no salt, so the list has no clearing row.
+ */
+export const PicksSaltCode: Story = {
+  parameters: { msw: { handlers: spyHandlers } },
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    sent.length = 0;
+    const canvas = within(canvasElement);
+
+    // Row 3 holds only a virtual sample, the only row whose salt code is editable.
+    const saltCode = await canvas.findByLabelText('Salt Code, row 3');
+    await expect(saltCode.tagName).toBe('BUTTON');
+    await expect(saltCode.querySelector('input')).toBeNull();
+
+    await userEvent.click(saltCode);
+    // Scoped to the open list, so nothing else on the page that happens to be an option can match.
+    await userEvent.click(await within(await screen.findByRole('listbox')).findByRole('option', { name: 'Na' }));
+    await waitFor(() => expect(sent).toHaveLength(1));
+    await expect(sent[0]).toMatchObject({ type: 'SetInputRowSaltCode', saltCode: { name: 'Na' } });
+
+    // ...but there is no way back out to nothing: the list offers only real codes.
+    await userEvent.click(canvas.getByLabelText('Salt Code, row 3'));
+    const list = await screen.findByRole('listbox');
+    await expect(within(list).queryByRole('option', { name: '—' })).not.toBeInTheDocument();
+    await expect(within(list).getByRole('option', { name: '00 - Parent Structure' })).toBeInTheDocument();
+  },
+};
+
+/**
+ * **Several hazards are one request, sent when the list is left.** The list stays open across
+ * ticks, and a request per tick built the second from a value the first had not changed yet —
+ * the server was left with only the last one ticked.
+ */
+export const HazardsAreSentOnceWhenTheListCloses: Story = {
+  parameters: { msw: { handlers: spyHandlers } },
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    sent.length = 0;
+    const canvas = within(canvasElement);
+
+    // Batch 1 already holds Corrosive and Flammable.
+    await userEvent.click(await canvas.findByLabelText('Hazard Comments, batch 1'));
+    const list = await screen.findByRole('listbox');
+    await userEvent.click(await within(list).findByRole('option', { name: 'Irritant' }));
+    await userEvent.click(within(list).getByRole('option', { name: 'Toxic' }));
+    // Ticked, and shown as ticked, but not sent.
+    await expect(within(list).getByRole('option', { name: 'Irritant' })).toHaveAttribute('aria-selected', 'true');
+    await expect(sent).toEqual([]);
+
+    await userEvent.click(document.body);
+    await waitFor(() => expect(sent).toHaveLength(1));
+    await expect(sent[0]).toMatchObject({
+      type: 'SetInputHealthHazards',
+      anchor: 'ins0000a',
+      healthHazards: [{ name: 'Corrosive' }, { name: 'Flammable' }, { name: 'Irritant' }, { name: 'Toxic' }],
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await expect(sent).toHaveLength(1);
+  },
+};
+
+/** Escape abandons the ticks, as it abandons a number — and so does ticking back to where it started. */
+export const HazardsAreNotSentWhenAbandoned: Story = {
+  parameters: { msw: { handlers: spyHandlers } },
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    sent.length = 0;
+    const canvas = within(canvasElement);
+    const hazards = await canvas.findByLabelText('Hazard Comments, batch 1');
+
+    await userEvent.click(hazards);
+    await userEvent.click(await screen.findByRole('option', { name: 'Irritant' }));
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument());
+    await expect(hazards).not.toHaveTextContent('Irritant');
+
+    await userEvent.click(hazards);
+    await userEvent.click(await screen.findByRole('option', { name: 'Irritant' }));
+    await userEvent.click(screen.getByRole('option', { name: 'Irritant' }));
+    await userEvent.click(document.body);
+    await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument());
+
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await expect(sent).toEqual([]);
+  },
+};
+
+/**
+ * A molecular formula arrives as HTML — `C<sub>10</sub>H<sub>12</sub>N<sub>2</sub>O<sub>4</sub>` —
+ * and its subscripts sit below the line on `align-sub`. The cell also truncates, which brings
+ * `overflow: hidden`, so without padding to clip against the digits get shaved off the bottom.
+ *
+ * Asserted at several zoom levels because that is how it showed up: the overflow was there all
+ * along, and subpixel rounding decided which zooms made it visible.
+ */
+export const FormulaSubscriptsAreNotClipped: Story = {
+  play: async ({ canvasElement }) => {
+    await document.fonts.ready;
+    const formula = canvasElement.querySelector('sub')!.parentElement!;
+
+    try {
+      for (const zoom of [1, 1.1, 1.25, 1.33, 1.5, 1.75, 2]) {
+        (document.body.style as unknown as Record<string, string>).zoom = String(zoom);
+        await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+
+        const sub = formula.querySelector('sub')!;
+        const overflow = sub.getBoundingClientRect().bottom - formula.getBoundingClientRect().bottom;
+        await expect(`${zoom}x overflow ${overflow.toFixed(1)}px`).toBe(
+          `${zoom}x overflow ${Math.min(overflow, 0).toFixed(1)}px`,
+        );
+      }
+    } finally {
+      // Zoom is set on the shared document, so leaving it raised would follow other stories home.
+      (document.body.style as unknown as Record<string, string>).zoom = '1';
+    }
+  },
+};
+
+/**
+ * Once a registered sample is attached, the compound's salt code and salt EQ come from the
+ * registry, so both stay locked even though the row has a salt code set.
+ */
+export const StoredCompoundSaltLocked: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    // Row 4 has a registered sample and a salt code; row 3 holds only a virtual sample.
+    await expect(canvas.getByLabelText('Salt EQ, row 4')).toBeDisabled();
+    await expect(canvas.getByLabelText('Salt EQ, row 3')).toBeEnabled();
+  },
+};
+
+/**
+ * A read-only cell shows the arrow, not the text I-beam — whether it holds a value or an
+ * em-dash. `cursor: auto`, the initial value, resolves to an I-beam over text content, and an
+ * I-beam is the cursor that means "type here": on a cell that cannot be edited it invites a
+ * click that does nothing.
+ *
+ * Asserted on computed style rather than on class names, since what matters is what the browser
+ * actually renders — these stories run in real Chromium, so it can be asked.
+ */
+export const ReadOnlyCellsUseArrowCursor: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+
+    // Editability decides the cursor, not emptiness. In a numeric cell the input sits on top of
+    // the display, so it is the input that the pointer is over — enabled or not.
+    const editableInput = canvas.getByLabelText('Weight, batch 1');
+    const lockedInput = canvas.getByLabelText('Salt EQ, row 4');
+    await expect(editableInput).toBeEnabled();
+    await expect(lockedInput).toBeDisabled();
+    await expect(getComputedStyle(editableInput).cursor).toBe('text');
+    await expect(getComputedStyle(lockedInput).cursor).toBe('default');
+
+    // Columns with no editor at all — the compound-level Weight and Volume, Compound ID, the
+    // batch summary — are plain text, whether they hold a value or an em-dash.
+    // `aria-hidden` is an editable text cell's invisible sizer, which holds an em-dash while the
+    // cell is empty and lies under its input — not a read-only cell, and never what is hovered.
+    // Nor is one inside a button: that is an editable picker with nothing chosen yet.
+    const plain = canvas
+      .getAllByText('—')
+      .filter(
+        (cell) =>
+          cell.closest('[data-slot="numeric-cell"]') === null &&
+          cell.closest('button') === null &&
+          !cell.hasAttribute('aria-hidden'),
+      );
+    await expect(plain.length).toBeGreaterThan(0);
+    for (const cell of plain) {
+      await expect(getComputedStyle(cell).cursor).toBe('default');
+    }
+    await expect(getComputedStyle(canvas.getAllByText('STR-00000000-89')[0]).cursor).toBe('default');
+  },
+};
+
+/** With editing off, even the normally-editable numeric cells drop the I-beam. */
+export const ReadOnlyExperimentUsesArrowCursor: Story = {
+  args: { experiment: makeExperimentDetails({ currentPermissions: ['VIEW_EXPERIMENTS'] }) },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByLabelText('Weight, batch 1')).toBeDisabled();
+    await expect(getComputedStyle(canvas.getByLabelText('Weight, batch 1')).cursor).toBe('default');
+  },
+};
+
+/** Reads the experiment back out of the cache, so a landed patch is visible. */
+function TableFromCache() {
+  const { data } = useExperiment(EXPERIMENT.id);
+  return data ? <StoichiometryTable experiment={data} reaction={data.model.reactions[0]} /> : null;
+}
+
+/** Editing a batch weight sends `SetInputWeight` with the sample's anchor and value — no unit. */
+export const EditsSampleWeight: Story = {
+  parameters: { msw: { handlers: spyHandlers } },
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    sent.length = 0;
+    const canvas = within(canvasElement);
+
+    const input = await canvas.findByLabelText('Weight, batch 1');
+    await userEvent.click(input);
+    await userEvent.clear(input);
+    await userEvent.type(input, '750{Enter}');
+
+    await waitFor(() => expect(sent).toEqual([{ type: 'SetInputWeight', anchor: 'ins0000a', weight: '750' }]));
+  },
+};
+
+/**
+ * A cell that already holds a value saves as soon as focus leaves it. Nothing else
+ * confirms the edit — there is no Save button on this screen — so a blur that quietly kept the
+ * number on screen without sending it would leave no way to tell whether the change took.
+ */
+export const BlurSavesAChangedValue: Story = {
+  parameters: { msw: { handlers: spyHandlers } },
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    sent.length = 0;
+    const canvas = within(canvasElement);
+
+    const input = await canvas.findByLabelText('Weight, batch 1');
+    await userEvent.click(input);
+    await userEvent.clear(input);
+    await userEvent.type(input, '700');
+    // No Enter — just leaving.
+    await userEvent.click(document.body);
+
+    await waitFor(() => expect(sent).toEqual([{ type: 'SetInputWeight', anchor: 'ins0000a', weight: '700' }]));
+  },
+};
+
+/** Clearing a value sends null — not an empty string. */
+export const ClearsCell: Story = {
+  parameters: { msw: { handlers: spyHandlers } },
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    sent.length = 0;
+    const canvas = within(canvasElement);
+
+    await userEvent.click(await canvas.findByLabelText('Weight, batch 1'));
+    await userEvent.clear(canvas.getByLabelText('Weight, batch 1'));
+    await userEvent.keyboard('{Enter}');
+
+    await waitFor(() => expect(sent).toEqual([{ type: 'SetInputWeight', anchor: 'ins0000a', weight: null }]));
+  },
+};
+
+/** Tab commits a changed value and moves straight on to the next cell's number. */
+export const TabCommitsAndMovesOn: Story = {
+  parameters: { msw: { handlers: spyHandlers } },
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    sent.length = 0;
+    const canvas = within(canvasElement);
+
+    const input = await canvas.findByLabelText('Weight, batch 1');
+    await userEvent.click(input);
+    await userEvent.clear(input);
+    await userEvent.type(input, '812');
+    await userEvent.tab();
+
+    await expect(canvas.getByLabelText('Volume, batch 1')).toHaveFocus();
+    await waitFor(() => expect(sent).toEqual([{ type: 'SetInputWeight', anchor: 'ins0000a', weight: '812' }]));
+  },
+};
+
+/**
+ * **The property the whole structure exists for.** Both forms are always in the DOM and the
+ * number is the cell's only focusable element, so tab order is the document's own — a row walks
+ * value, value, value with nothing managing focus.
+ */
+export const TabOrderWalksTheRow: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+
+    const weight = canvas.getByLabelText('Weight, batch 1');
+    weight.focus();
+
+    await userEvent.tab();
+    await expect(canvas.getByLabelText('Volume, batch 1')).toHaveFocus();
+
+    // ...and back out again, so nothing traps focus inside a cell.
+    await userEvent.tab({ shift: true });
+    await expect(weight).toHaveFocus();
+  },
+};
+
+/**
+ * **The unit is in the header, never in the cell.** Every value of a quantity is in the
+ * experiment's one unit, so the header says it once — `Weight, mg` — and the cells are bare
+ * numbers. Density, molarity and purity read the same way, with units no one picks.
+ */
+export const UnitsAreInTheHeaders: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const display = (name: string) =>
+      canvas
+        .getByLabelText(name)
+        .closest('[data-slot="numeric-cell"]')!
+        .querySelector('[data-slot="numeric-cell-value"]');
+
+    await expect(canvas.getAllByRole('columnheader', { name: 'Weight, mg' }).length).toBeGreaterThan(0);
+    await expect(canvas.getAllByRole('columnheader', { name: 'Mol, mmol' }).length).toBeGreaterThan(0);
+    await expect(canvas.getAllByRole('columnheader', { name: 'Mol. Weight, g/mol' })).toHaveLength(1);
+    await expect(canvas.getAllByText('Density, g/mL').length).toBeGreaterThan(0);
+    await expect(canvas.getAllByText('Molarity, M').length).toBeGreaterThan(0);
+    await expect(canvas.getAllByText('Purity, %').length).toBeGreaterThan(0);
+
+    await expect(display('Weight, batch 1')).toHaveTextContent(/^676\.5$/);
+    await expect(display('Density, batch 2')).toHaveTextContent(/^1\.08$/);
+    await expect(display('Purity, batch 1')).toHaveTextContent(/^98\.5$/);
+    await expect(display('Mol. Weight, row 1')).toHaveTextContent(/^102\.09$/);
+  },
+};
+
+/**
+ * **The unit is picked in the header**, experiment-wide: the underlined unit opens the choices,
+ * and picking one sends the mutation — the backend converts every value and the patch brings
+ * them back in the new unit. Only weight, volume and mol are picked; molarity's unit is fixed.
+ */
+export const SetsExperimentWeightUnit: Story = {
+  parameters: { msw: { handlers: spyHandlers } },
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    sent.length = 0;
+    const canvas = within(canvasElement);
+
+    const [header, ...subHeaders] = await canvas.findAllByRole('columnheader', { name: 'Weight, mg' });
+    // Only the top-level header picks; each open compound's batch header just reads the unit.
+    await expect(subHeaders.length).toBeGreaterThan(0);
+    for (const sub of subHeaders) await expect(within(sub).queryByRole('button')).not.toBeInTheDocument();
+    await userEvent.click(within(header).getByRole('button', { name: 'mg' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'g' }));
+
+    await waitFor(() => expect(sent).toEqual([{ type: 'SetExperimentWeightUnit', weightUnit: 'G' }]));
+    await expect(canvas.queryByRole('button', { name: 'M' })).not.toBeInTheDocument();
+  },
+};
+
+/** Picking the unit already in use sends nothing. */
+export const SameUnitSendsNothing: Story = {
+  parameters: { msw: { handlers: spyHandlers } },
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    sent.length = 0;
+    const canvas = within(canvasElement);
+
+    const header = (await canvas.findAllByRole('columnheader', { name: 'Mol, mmol' }))[0];
+    await userEvent.click(within(header).getByRole('button', { name: 'mmol' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'mmol' }));
+
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await expect(sent).toEqual([]);
+  },
+};
+
+/** An experiment that cannot be edited shows its units as plain text, with nothing to pick. */
+export const ReadOnlyUnitsArePlainText: Story = {
+  args: { experiment: makeExperimentDetails({ currentPermissions: ['VIEW_EXPERIMENTS'] }) },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const header = canvas.getAllByRole('columnheader', { name: 'Weight, mg' })[0];
+    await expect(within(header).queryByRole('button')).not.toBeInTheDocument();
+  },
+};
+
+/**
+ * Escape abandons the edit outright: it reverts the draft, drops focus, and sends nothing — so
+ * the cell is back to its display without having touched the server.
+ *
+ * The last of those is the one worth a test. Blurring is what returns the cell to view mode, but
+ * blur is also what commits, and the commit reads the draft from the render already on screen —
+ * the value Escape just discarded. Without the guard in `NumericCell`, Escape would *save* the
+ * thing it is supposed to throw away.
+ */
+export const EscapeRevertsAndLeaves: Story = {
+  parameters: { msw: { handlers: spyHandlers } },
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    sent.length = 0;
+    const canvas = within(canvasElement);
+
+    const input = await canvas.findByLabelText('Weight, batch 1');
+    await userEvent.click(input);
+    await userEvent.clear(input);
+    await userEvent.type(input, '999');
+    await userEvent.keyboard('{Escape}');
+
+    // Focus is gone, so `:focus-within` no longer holds the editor up.
+    await expect(input).not.toHaveFocus();
+    // The draft is back to what the server confirmed.
+    await waitFor(() => expect(input).toHaveValue(676.5));
+    await expect(
+      input.closest('[data-slot="numeric-cell"]')!.querySelector('[data-slot="numeric-cell-value"]'),
+    ).toHaveTextContent('676.5');
+
+    // ...and nothing was sent, which is the part that would silently regress.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await expect(sent).toEqual([]);
+  },
+};
+
+/**
+ * **Regression guard**, the same one the other panels carry: opening a cell and leaving it
+ * without changing anything must send nothing. Tabbing across a row is a normal thing to do.
+ */
+export const NoRequestWhenUnchanged: Story = {
+  parameters: { msw: { handlers: spyHandlers } },
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    sent.length = 0;
+    const canvas = within(canvasElement);
+
+    await userEvent.click(await canvas.findByLabelText('Weight, batch 1'));
+    await userEvent.click(document.body);
+
+    await userEvent.click(canvas.getByRole('textbox', { name: 'Chem. Name, row 1' }));
+    await userEvent.click(document.body);
+
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await expect(sent).toEqual([]);
+  },
+};
+
+/**
+ * **Scrolling past a number must not change it.** Chrome steps a focused number input on the
+ * wheel and keeps the scroll for itself, and the blur then saves a number nobody typed.
+ *
+ * The wheel has to be a real one — a synthetic `WheelEvent` has no default action, so it would
+ * pass with or without the fix — and only the Vitest runner can make one. Opened in Storybook
+ * itself the story renders and asserts nothing.
+ */
+export const WheelDoesNotChangeANumber: Story = {
+  parameters: { msw: { handlers: spyHandlers } },
+  // Taller than the window, so there is somewhere to scroll to.
+  render: () => (
+    <div className="pb-[100vh]">
+      <TableFromCache />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    if (import.meta.env.MODE !== 'test') return;
+    const { userEvent: browser } = await import('vitest/browser');
+    sent.length = 0;
+    const canvas = within(canvasElement);
+
+    const input = await canvas.findByLabelText('Weight, batch 1');
+    await userEvent.click(input);
+    await browser.wheel(input, { delta: { y: 100 } });
+
+    await waitFor(() => expect(window.scrollY).toBeGreaterThan(0));
+    await expect(input).toHaveValue(676.5);
+    await expect(input).toHaveFocus();
+    // The editor is still an editor once the wheel has passed.
+    await waitFor(() => expect(input).not.toHaveAttribute('readonly'));
+
+    await userEvent.click(document.body);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await expect(sent).toEqual([]);
+  },
+};
+
+/**
+ * The flash. The server answers a one-cell edit by recalculating a value the user did not
+ * touch, and that cell is marked so the change is not silent — green, or red where the value it
+ * replaced was one the user had entered.
+ */
+export const Recalculated: Story = {
+  parameters: { msw: { handlers: recalculatingMutateHandlers } },
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+
+    await userEvent.click(await canvas.findByLabelText('Purity, batch 2'));
+    await userEvent.type(canvas.getByLabelText('Purity, batch 2'), '99{Enter}');
+
+    // The patch rewrites this batch's mol, which nothing on screen asked for.
+    // The provenance classes and the flash live on the display span, not on the input.
+    await waitFor(() => expect(canvas.getByText('0.0075')).toBeInTheDocument());
+    await expect(canvas.getByText('0.0075')).toHaveClass('animate-[flash-green_500ms_ease-in-out]');
+    // And it replaces a hand-entered volume with a calculated one: overwritten, so red.
+    await expect(canvas.getByText('0.8')).toHaveClass('animate-[flash-red_500ms_ease-in-out]');
+  },
+};
+
+/** One cell freezes while it saves; its neighbours stay live. */
+export const Saving: Story = {
+  parameters: { msw: { handlers: slowMutateHandlers } },
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+
+    await userEvent.click(await canvas.findByLabelText('Weight, batch 1'));
+    await userEvent.type(canvas.getByLabelText('Weight, batch 1'), '5{Enter}');
+
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Saving…'));
+    // Only that cell: the batch's volume cell is untouched.
+    await expect(canvas.getByLabelText('Volume, batch 1')).toBeEnabled();
+  },
+};
+
+/**
+ * Adding a row is a write like any other, so the toolbar button reports it the way a cell does —
+ * a spinner over the button, and the button inert meanwhile so the row cannot be added twice.
+ *
+ * The spinner only past `SavingOverlay`'s 300 ms delay: the usual `AddEmptyInput` beats that and
+ * shows nothing, which is the point of the delay. The button is inert from the first moment.
+ */
+export const AddingARow: Story = {
+  parameters: { msw: { handlers: slowMutateHandlers } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+
+    await userEvent.click(canvas.getByRole('button', { name: 'Add empty row' }));
+
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Saving…'));
+
+    // The busy region is the button itself, not the toolbar: `SavingOverlay` publishes
+    // `data-saving` on the box it froze, and that box holds only this one button.
+    const busy = canvasElement.querySelector('[data-saving]');
+    await expect(busy).toContainElement(canvas.getByRole('button', { name: 'Add empty row' }));
+    await expect(busy).not.toContainElement(canvas.getByRole('button', { name: 'Add sample' }));
+    // So the rest of the toolbar stays live while the row is on its way.
+    await expect(canvas.getByRole('button', { name: 'Add sample' })).toBeEnabled();
+  },
+};
+
+/**
+ * **A slow save must not cost the user their place.** `SavingOverlay` freezes the region it
+ * covers with `inert`, and `inert` blurs whatever is inside it — so a cell saving in the
+ * background drops focus to nowhere. The overlay hands it back when it unfreezes.
+ *
+ * What comes back is the **cell**, which is where Enter left focus — not the editor, which would
+ * be reopening an edit that is already saved.
+ *
+ * Only when focus is still nowhere: a user who has moved on in the meantime keeps their place.
+ */
+export const SlowSaveRestoresFocus: Story = {
+  parameters: { msw: { handlers: freezingHandlers } },
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+
+    const input = await canvas.findByLabelText('Weight, batch 1');
+    await userEvent.click(input);
+    await userEvent.clear(input);
+    await userEvent.type(input, '451{Enter}');
+    // Enter leaves focus on the cell's parking span — after the input, so the next Tab leaves the cell.
+    const resting = input.parentElement!.querySelector('[tabindex="-1"]')!;
+
+    // The cell freezes for the save at once, and `inert` takes focus away.
+    await waitFor(() => expect(resting).not.toHaveFocus());
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Saving…'));
+
+    // ...and it comes back once the save lands.
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument(), { timeout: 5_000 });
+    await waitFor(() => expect(resting).toHaveFocus());
+  },
+};
+
+/**
+ * **Clicking away finishes the edit too**, and it is the case that used to come back: focus went
+ * nowhere, so `SavingOverlay` remembered the input it then froze and handed focus back to it when
+ * the save landed — reopening the editor over a value that was already saved. The cell now parks
+ * focus where Enter parks it, so what comes back is the display.
+ */
+export const ClickingAwayLeavesEditMode: Story = {
+  parameters: { msw: { handlers: freezingHandlers } },
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+
+    const input = await canvas.findByLabelText('Volume, batch 2');
+    await userEvent.click(input);
+    await userEvent.clear(input);
+    await userEvent.type(input, '7');
+    await userEvent.click(document.body);
+
+    // The cell freezes for the save and then comes back.
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Saving…'));
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument(), { timeout: 5_000 });
+
+    await expect(input).not.toHaveFocus();
+    // ...and Tab carries on from the cell rather than from the top of the page.
+    await userEvent.tab();
+    await expect(canvas.getByLabelText('Mol, batch 2')).toHaveFocus();
+  },
+};
+
+/**
+ * **Enter finishes the edit.** The value is sent and the cell goes straight back to showing it —
+ * an editor left open over a saved value invites the same edit being made twice — while focus
+ * stays on the cell, so Tab carries on to the next control from there.
+ */
+export const EnterLeavesEditMode: Story = {
+  parameters: { msw: { handlers: spyHandlers } },
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    sent.length = 0;
+    const canvas = within(canvasElement);
+
+    const input = await canvas.findByLabelText('Weight, batch 1');
+    await userEvent.click(input);
+    await userEvent.clear(input);
+    await userEvent.type(input, '333{Enter}');
+
+    await expect(input).not.toHaveFocus();
+    await waitFor(() => expect(sent).toHaveLength(1));
+    await expect(sent[0]).toMatchObject({ type: 'SetInputWeight', weight: '333' });
+
+    // The display is back — the spy answers with an empty patch, so it still reads what the
+    // server last confirmed — and Tab goes on to the next cell rather than back into this one.
+    await expect(
+      input.closest('[data-slot="numeric-cell"]')!.querySelector('[data-slot="numeric-cell-value"]'),
+    ).toBeVisible();
+    await expect(
+      input.closest('[data-slot="numeric-cell"]')!.querySelector('[data-slot="numeric-cell-value"]'),
+    ).toHaveTextContent('676.5');
+    await userEvent.tab();
+    await expect(canvas.getByLabelText('Volume, batch 1')).toHaveFocus();
+  },
+};
+
+/**
+ * **A cell in flight shows what it sent.** The editor closes on commit, so without this the cell
+ * would go back to the server's value and sit there for a whole round trip showing the number the
+ * user has just replaced — which reads as the edit having been dropped.
+ *
+ * It is written as a user-entered value, because that is what it is about to be.
+ *
+ * When the save settles the model is back in charge. This handler answers with an empty patch, so
+ * what comes back is the old value; a real patch would carry the new one.
+ */
+export const ShowsWhatWasSentWhileSaving: Story = {
+  parameters: { msw: { handlers: freezingHandlers } },
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+
+    const input = await canvas.findByLabelText('Weight, batch 1');
+    await userEvent.click(input);
+    await userEvent.clear(input);
+    await userEvent.type(input, '700{Enter}');
+
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Saving…'));
+    const display = input.closest('[data-slot="numeric-cell"]')!.querySelector('[data-slot="numeric-cell-value"]')!;
+    await expect(display).toHaveTextContent('700');
+    await expect(display).toHaveClass('text-blue-400');
+
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument(), { timeout: 5_000 });
+    await expect(display).toHaveTextContent('676.5');
+  },
+};
+
+/** A failed save leaves the cell showing what the server last confirmed. */
+export const FailedSaveKeepsServerValue: Story = {
+  parameters: { msw: { handlers: failingMutateHandlers } },
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+
+    const input = await canvas.findByLabelText('Weight, batch 1');
+    await userEvent.click(input);
+    await userEvent.clear(input);
+    await userEvent.type(input, '5{Enter}');
+
+    // Nothing was written to the cache, so the display still shows what the server confirmed.
+    await waitFor(() =>
+      expect(
+        input.closest('[data-slot="numeric-cell"]')!.querySelector('[data-slot="numeric-cell-value"]'),
+      ).toHaveTextContent('676.5'),
+    );
+  },
+};
+
+/** Picking a precision sends the experiment-level mutation; the backend reformats every value. */
+export const SetsSignificantFigures: Story = {
+  parameters: { msw: { handlers: spyHandlers } },
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    sent.length = 0;
+    const canvas = within(canvasElement);
+
+    await userEvent.click(await canvas.findByRole('button', { name: 'Significant figures' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: '3' }));
+
+    await waitFor(() => expect(sent).toEqual([{ type: 'SetExperimentSignificantFigures', significantFigures: 3 }]));
+  },
+};
+
+/** The add button sends `AddEmptyInput` against the reaction, not against a row. */
+export const AddsEmptyRow: Story = {
+  parameters: { msw: { handlers: spyHandlers } },
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    sent.length = 0;
+    await userEvent.click(await within(canvasElement).findByRole('button', { name: 'Add empty row' }));
+
+    await waitFor(() =>
+      expect(sent).toEqual([
+        {
+          type: 'AddEmptyInput',
+          anchor: 'rxn00001',
+          createdInputAnchor: expect.any(String),
+          createdSampleAnchor: expect.any(String),
+        },
+      ]),
+    );
+  },
+};
+
+/**
+ * The two deletes are different mutations against different anchors — `RemoveInputRow` takes
+ * the compound with all its batches, `RemoveInput` takes one batch.
+ */
+export const DeletesRowAndBatch: Story = {
+  parameters: { msw: { handlers: spyHandlers } },
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    sent.length = 0;
+    const canvas = within(canvasElement);
+
+    await userEvent.click(await canvas.findByRole('button', { name: 'Delete batch 1' }));
+    await waitFor(() => expect(sent).toEqual([{ type: 'RemoveInput', anchor: 'ins0000a' }]));
+
+    sent.length = 0;
+    await userEvent.click(canvas.getByRole('button', { name: 'Delete compound 1' }));
+    await waitFor(() => expect(sent).toEqual([{ type: 'RemoveInputRow', anchor: 'inp00001' }]));
+  },
+};
+
+/**
+ * The Column Selector switches a compound column and a batch detail off at once — the batch row
+ * gives the compound row's lost column back through its details cell, so the two still line up —
+ * and Reset brings both back. A tick applies immediately; the menu stays open for the next one.
+ */
+export const HidesColumns: Story = {
+  beforeEach: () => {
+    clearColumnChoices();
+    return clearColumnChoices;
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(await canvas.findByRole('columnheader', { name: 'Chem. Name' })).toBeInTheDocument();
+    // A batch detail's label is a span inside its group's header, not a header of its own.
+    await expect(canvas.getAllByText('Hazard Comments').length).toBeGreaterThan(0);
+
+    await userEvent.click(canvas.getByRole('button', { name: 'Choose columns' }));
+    await userEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Chem. Name' }));
+    await userEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Hazard Comments' }));
+
+    await waitFor(() => expect(canvas.queryByRole('columnheader', { name: 'Chem. Name' })).not.toBeInTheDocument());
+    await expect(canvas.queryByText('Hazard Comments')).not.toBeInTheDocument();
+    await expect(screen.getByRole('menuitemcheckbox', { name: 'Chem. Name' })).toHaveAttribute('aria-checked', 'false');
+
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Reset to default' }));
+    await expect(await canvas.findByRole('columnheader', { name: 'Chem. Name' })).toBeInTheDocument();
+  },
+};

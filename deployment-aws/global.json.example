@@ -1,0 +1,27 @@
+// rename to global.json, remove comments and edit according to your environment
+{
+  // AWS account number
+  "account": "123456789012",
+  // region
+  "region": "us-east-1",
+  // optional: if set, all created roles will use this permission boundary
+  "permissionBoundary": "arn:aws:iam::123456789012:policy/role_boundary",
+  // existing VPC where application will run
+  "vpc": "vpc-12345678",
+  // created resources will use these security groups
+  "securityGroups": ["sg-12345678", "sg-12345678"],
+  // ssh key pair that will be used by created EC2 instances
+  "ec2KeyPair": "ec2_key_pair",
+  // DNS hosted zone
+  "hostedZone": "Z12345678",
+  // DNS hosted zone name
+  "hostedZoneName": "example.com",
+  // only used by build stack
+  "sonarDomainName": "sonar.example.com",
+  // only used by build stack
+  "sonarPostgresMasterUsername": "username",
+  // only used by build stack
+  "sonarImage": "public.ecr.aws/docker/library/sonarqube:community",
+  // list of independent deployment environments
+  "environments": ["test", "prod"]
+}

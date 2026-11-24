@@ -1,0 +1,25 @@
+plugins {
+    java
+    `eln-conventions`
+    `eln-licenses`
+    id("io.quarkus")
+}
+
+dependencies {
+    implementation(project(":common:common-service"))
+    implementation(project(":signature:signature-core"))
+}
+
+group = "com.epam.indigoeln"
+version = "3.0.0-SNAPSHOT"
+
+val buildDocker = tasks.register<Exec>("buildDocker") {
+    outputs.upToDateWhen { false }
+    commandLine("docker", "build", "-f", "src/main/docker/Dockerfile.jvm", "-t", "indigoeln/signature-service:built", ".")
+    standardOutput = System.out
+    errorOutput = System.err
+}
+
+tasks.named("assemble") {
+    finalizedBy("buildDocker")
+}

@@ -1,0 +1,4 @@
+build
+!build/quarkus-app
+!build/nativelibs
+!build/licenses

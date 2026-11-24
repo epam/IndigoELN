@@ -1,0 +1,52 @@
+package com.epam.indigoeln.reaction.metamodel;
+
+import com.epam.indigoeln.common.model.units.MolUnit;
+import com.epam.indigoeln.common.model.units.NoUnit;
+import com.epam.indigoeln.common.model.units.VolumeUnit;
+import com.epam.indigoeln.common.model.units.WeightUnit;
+import com.epam.indigoeln.reaction.metamodel.property.Metamodel;
+import com.epam.indigoeln.reaction.metamodel.property.ModelProperty;
+import com.epam.indigoeln.reaction.model.CompoundRef;
+import com.epam.indigoeln.reaction.model.EnteredValue;
+import com.epam.indigoeln.reaction.model.InputAnchor;
+import com.epam.indigoeln.reaction.model.ReactionInput;
+import com.epam.indigoeln.reaction.model.ReactionInputSample;
+import com.epam.indigoeln.reaction.model.ReactionRole;
+import com.epam.indigoeln.reaction.model.ReactionRow;
+import org.jspecify.annotations.Nullable;
+
+import java.util.List;
+
+import static com.epam.indigoeln.reaction.metamodel.property.ModelProperty.enteredValueProperty;
+import static com.epam.indigoeln.reaction.metamodel.property.ModelProperty.listProperty;
+import static com.epam.indigoeln.reaction.metamodel.property.ModelProperty.property;
+
+public class ReactionInputMetamodel {
+
+    // ReactionRow
+    public static final ModelProperty<ReactionInput, CompoundRef> COMPOUND = property("compound", ReactionRow::getCompound, ReactionInput::updateCompound);
+    public static final ModelProperty<ReactionInput, EnteredValue<NoUnit>> EQ = enteredValueProperty("eq", ReactionRow::getEq, ReactionRow::setEq, EnteredValue.DEFAULT_ONE);
+    public static final ModelProperty<ReactionInput, @Nullable Integer> RXN_POSITION = property("rxnPosition", ReactionRow::getRxnPosition, ReactionRow::setRxnPosition);
+    // ReactionInput
+    public static final ModelProperty<ReactionInput, InputAnchor> ANCHOR = property("anchor", ReactionInput::getAnchor, null);
+    public static final ModelProperty<ReactionInput, ReactionRole> ROLE = property("role", ReactionInput::getRole, ReactionInput::setRole);
+    public static final ModelProperty<ReactionInput, EnteredValue<MolUnit>> MOL = enteredValueProperty("mol", ReactionInput::getMol, ReactionInput::setMol);
+    public static final ModelProperty<ReactionInput, EnteredValue<WeightUnit>> WEIGHT = enteredValueProperty("weight", ReactionInput::getWeight, ReactionInput::setWeight);
+    public static final ModelProperty<ReactionInput, EnteredValue<VolumeUnit>> VOLUME = enteredValueProperty("volume", ReactionInput::getVolume, ReactionInput::setVolume);
+    public static final ModelProperty<ReactionInput, @Nullable String> CHEMICAL_NAME = property("chemicalName", ReactionInput::getChemicalName, ReactionInput::setChemicalName);
+    public static final ModelProperty<ReactionInput, Boolean> LIMITING = property("limiting", ReactionInput::isLimiting, null);
+    public static final ModelProperty<ReactionInput, List<ReactionInputSample>> SAMPLES = listProperty("samples", ReactionInput::getSamples, ReactionInput::setSamples, ReactionInputSampleMetamodel.INSTANCE);
+
+    public static final Metamodel<ReactionInput> INSTANCE = new Metamodel<>("ReactionInput", List.of(
+            COMPOUND,
+            EQ,
+            ANCHOR,
+            ROLE,
+            MOL,
+            WEIGHT,
+            VOLUME,
+            CHEMICAL_NAME,
+            LIMITING,
+            SAMPLES
+    ));
+}

@@ -1,0 +1,55 @@
+version: 0.2
+env:
+  # bash rather than CodeBuild's default sh (dash), consistently across every buildspec.
+  shell: bash
+phases:
+  install:
+    runtime-versions:
+      # The major frontend/.nvmrc pins; CodeBuild takes a major only and picks the patch itself.
+      nodejs: 24
+  build:
+    commands:
+      # Fail loudly if env.shell did not take effect: under dash `set -eo pipefail` errors but
+      # execution carries on *without* `set -e`, silently disabling error propagation.
+      - '[ -n "$BASH_VERSION" ] || { echo "this buildspec needs bash - check env.shell" >&2; exit 1; }'
+      - set -eo pipefail
+      - cd frontend
+      # pnpm at the version package.json's `packageManager` pins.
+      - corepack enable
+      - pnpm install --frozen-lockfile
+      - pnpm run format:check
+      - pnpm run build
+      - pnpm run check:bundle
+      # After the build: tsc needs the src/routeTree.gen.ts that only vite emits.
+      - pnpm run typecheck
+      - pnpm run lint
+      - pnpm run test:unit --coverage
+      # --with-deps installs Chromium's system libraries through apt, which needs root.
+      - pnpm exec playwright install --with-deps chromium
+      - pnpm run test:stories
+      # Reads frontend/sonar-project.properties; SONAR_HOST_URL and SONAR_TOKEN come from the
+      # CodeBuild project's environment (BuildStack.java).
+      - pnpm dlx @sonar/scan@5.0.0
+      # The image for the local docker-compose stack. Kept in the build phase rather than post_build,
+      # which runs even after a failed build and would publish an untested image. One command, so
+      # `set -e` covers every step: CodeBuild only sees the block's final exit status.
+      - |
+        set -eo pipefail
+        IMAGE_TAG=$(echo "$CODEBUILD_RESOLVED_SOURCE_VERSION" | cut -c 1-7)
+        aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$REGISTRY_URI"
+        # Keycloak settings are inlined by Vite at build time (src/lib/env.ts); these match the
+        # Keycloak that deployment-compose/docker-compose.yml runs. BuildKit is needed for the
+        # Dockerfile's cache mount.
+        DOCKER_BUILDKIT=1 docker build \
+          --build-arg VITE_AUTH_PROVIDER=keycloak \
+          --build-arg VITE_KEYCLOAK_URL=http://localhost:8088 \
+          --build-arg VITE_KEYCLOAK_REALM=indigo-eln \
+          --build-arg VITE_KEYCLOAK_CLIENT_ID=frontend-client \
+          -t "$FRONTEND_REPO_URI:latest" -t "$FRONTEND_REPO_URI:$IMAGE_TAG" \
+          "$CODEBUILD_SRC_DIR/frontend"
+        docker push "$FRONTEND_REPO_URI:latest"
+        docker push "$FRONTEND_REPO_URI:$IMAGE_TAG"
+artifacts:
+  files:
+    - '**/*'
+  base-directory: frontend/dist

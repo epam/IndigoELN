@@ -1,0 +1,478 @@
+import { Combobox as ComboboxPrimitive } from '@base-ui/react/combobox';
+import { ChevronDown, Loader2, X } from 'lucide-react';
+import type * as React from 'react';
+import { useRef, useState } from 'react';
+
+import { INPUT_ACTION, INPUT_BOX, INPUT_BOX_FOCUS_WITHIN, INPUT_DISABLED } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
+
+/**
+ * How far PageUp/PageDown jump through the suggestion list. Base UI declares
+ * PAGE_UP/PAGE_DOWN but deliberately leaves them out of COMPOSITE_KEYS, so the list
+ * ignores them; this component adds them by replaying that many arrow presses.
+ */
+const PAGE_STEP = 10;
+
+/** Identity, for the common case where the items already are their own labels. */
+/**
+ * Text size of the control and of its popup. `md` is the form default; `sm` matches the 13px a
+ * dense table sets, so a combobox in a cell does not read a size larger than the text beside it.
+ */
+export type ComboboxSize = 'sm' | 'md';
+
+const SIZE_TEXT: Record<ComboboxSize, string> = {
+  sm: 'text-[13px]/5',
+  md: 'text-[14px]/6',
+};
+
+/**
+ * How much room `MultiCombobox` keeps for typing beside its chips. A floor on the input is also a
+ * floor on *wrapping*, so it decides how soon a chip pushes the input onto a line of its own: at
+ * the form width there is room to be generous, while in a table cell 96px was enough to make a
+ * single chip turn a one-line field into a three-line one. `sm` keeps just enough to see a couple
+ * of characters, and the popup is what is really being read while typing anyway.
+ */
+const SIZE_INPUT_MIN: Record<ComboboxSize, string> = {
+  sm: 'min-w-10',
+  md: 'min-w-24',
+};
+
+/**
+ * The chip field's own box. `sm` bottoms out at 30px — a 24px chip, `py-0.5` and the border —
+ * which is the height of a text cell beside it; see `SIZE_BOX` in `Select`.
+ */
+const SIZE_CHIPS_BOX: Record<ComboboxSize, string> = {
+  sm: 'min-h-7.5 py-0.5',
+  md: 'min-h-10 py-1.5',
+};
+
+/**
+ * `cell` is the chip field a dense table wants — `Select`'s variant of the same name, for the
+ * same reason. At rest it is only its chips; the border, the chevron and each chip's ✕ appear
+ * when the field is hovered or holds focus.
+ *
+ * Everything it hides is hidden with `invisible` or a transparent colour, never `hidden`, so
+ * each part keeps its box and the field measures the same in both states — nothing moves when
+ * the cell is entered. It also never wraps: a table row is one line, so more chips widen the
+ * column instead of deepening the row.
+ */
+export type ComboboxVariant = 'box' | 'cell';
+
+const CELL_CHIPS_BOX =
+  'group/chips border-transparent bg-transparent hover:border-neutral-300 focus-within:bg-background';
+
+/** For what only belongs to the box: the chevron and the chips' remove buttons. */
+const CELL_BOX_ONLY = 'invisible group-focus-within/chips:visible';
+
+/**
+ * Puts a `cell` back in its view state while its input still holds focus — after Escape. The
+ * box is drawn by `:focus-within`, and letting go of focus to clear that would lose the user's
+ * place in the row: the next Tab would start from the top of the page. So the box's classes are
+ * overruled instead, which takes `!important`, since a variant outranks a plain utility.
+ */
+const CELL_CHIPS_BOX_DISMISSED = 'border-transparent! bg-transparent! ring-0!';
+const CELL_BOX_ONLY_DISMISSED = 'invisible!';
+
+function identity(item: unknown): string {
+  return String(item);
+}
+
+interface PopupContentProps<T> {
+  items: T[];
+  itemToKey: (item: T) => string;
+  itemToLabel: (item: T) => string;
+  /** How the list itself is doing, as opposed to what it contains. */
+  statusContent: string | null;
+  emptyContent: string | null;
+  error: boolean;
+  loading: boolean;
+  size: ComboboxSize;
+  /**
+   * Sizes the popup to its own options instead of to its anchor. For a `cell`, whose anchor is
+   * an input kept only a few characters wide — a list that narrow would be unreadable.
+   */
+  fitContent?: boolean;
+  listRef?: React.RefObject<HTMLDivElement | null>;
+}
+
+/**
+ * The popup: status region, empty region, list.
+ */
+function PopupContent<T>({
+  items,
+  itemToKey,
+  itemToLabel,
+  statusContent,
+  emptyContent,
+  error,
+  loading,
+  size,
+  fitContent = false,
+  listRef,
+}: PopupContentProps<T>) {
+  return (
+    <ComboboxPrimitive.Portal>
+      {/* `start`, so a list wider than its anchor opens from the caret rather than straddling it. */}
+      <ComboboxPrimitive.Positioner sideOffset={4} align={fitContent ? 'start' : undefined} className="z-50">
+        <ComboboxPrimitive.Popup
+          className={cn(
+            'max-h-60 overflow-y-auto rounded-md border border-neutral-300 bg-popover p-1 shadow-card outline-none',
+            fitContent ? 'w-max min-w-(--anchor-width) whitespace-nowrap' : 'w-(--anchor-width)',
+          )}
+        >
+          {/*
+            Status is Base UI's live region for the state of an asynchronously loaded
+            list. Same rule as Empty below: keep it mounted, vary its children.
+          */}
+          <ComboboxPrimitive.Status>
+            {statusContent && (
+              <div
+                className={cn(
+                  'flex items-center gap-2 px-3 py-2',
+                  SIZE_TEXT[size],
+                  error ? 'text-red-200' : 'text-neutral-700',
+                )}
+              >
+                {loading && <Loader2 className="size-4 shrink-0 animate-spin" />}
+                {statusContent}
+              </div>
+            )}
+          </ComboboxPrimitive.Status>
+          {/*
+            Base UI nulls this element's children once the list has items, and its docs
+            require the element itself to stay mounted and visible — it is the popup's
+            role="status" live region. So the padding sits on an inner node instead;
+            on the element itself it would leave a blank strip above a populated list.
+          */}
+          <ComboboxPrimitive.Empty>
+            {emptyContent && <div className={cn('px-3 py-2 text-neutral-700', SIZE_TEXT[size])}>{emptyContent}</div>}
+          </ComboboxPrimitive.Empty>
+          <ComboboxPrimitive.List ref={listRef}>
+            {items.map((item) => (
+              <ComboboxPrimitive.Item
+                key={itemToKey(item)}
+                value={item}
+                className={cn(
+                  'cursor-default rounded-2 px-3 py-2 outline-none data-highlighted:bg-blue-10',
+                  SIZE_TEXT[size],
+                )}
+              >
+                {itemToLabel(item)}
+              </ComboboxPrimitive.Item>
+            ))}
+          </ComboboxPrimitive.List>
+        </ComboboxPrimitive.Popup>
+      </ComboboxPrimitive.Positioner>
+    </ComboboxPrimitive.Portal>
+  );
+}
+
+interface MultiComboboxProps<T> {
+  /** The chosen chips. */
+  value: T[];
+  onValueChange: (value: T[]) => void;
+  /** Suggestions to offer. Filtering is the caller's job — this list is shown verbatim. */
+  items: T[];
+  /** Identity of an item: React keys, de-duplication, and value matching. */
+  itemToKey?: (item: T) => string;
+  /** What the item reads as, on its chip and in the list. */
+  itemToLabel?: (item: T) => string;
+  inputValue: string;
+  onInputValueChange: (inputValue: string) => void;
+  placeholder?: string;
+  id?: string;
+  /** For call sites with no visible label — most pair this with `Field` instead. */
+  'aria-label'?: string;
+  /** Shown in the popup when there is nothing to offer. */
+  emptyMessage?: string;
+  /**
+   * Whether text with no matching suggestion can be committed as a new chip. Off by
+   * default: most multiselects must draw from a fixed server-side set. Only meaningful
+   * for `T = string`, since a typed chip is the string itself.
+   */
+  allowCustomValues?: boolean;
+  /**
+   * Whether fresh suggestions are still on their way. Suppresses the empty-state message:
+   * "no matches" is a claim about a search that has not finished.
+   */
+  loading?: boolean;
+  /** Whether fetching suggestions failed, so the list is empty for a reason worth saying. */
+  error?: boolean;
+  /** Renders the chips but accepts no interaction — a reader who cannot edit. */
+  disabled?: boolean;
+  /** Text size of the control, its chips and its popup. `sm` matches a dense table's 13px. */
+  size?: ComboboxSize;
+  /** `cell` hides the box until the field is hovered or focused — see `ComboboxVariant`. */
+  variant?: ComboboxVariant;
+}
+
+/**
+ * A multi-select combobox rendering its selection as removable chips. Suggestion-only by
+ * default; `allowCustomValues` additionally lets typed text be committed as a new chip.
+ *
+ * Base UI already handles most of the keyboard contract: Backspace on an empty input
+ * deletes the last chip, ArrowLeft/ArrowRight walk the chips (Backspace/Delete removing
+ * the highlighted one), ArrowUp/ArrowDown and Home/End move through the suggestions, and
+ * Escape closes the list. Added here: PageUp/PageDown, and — when custom values are
+ * allowed — Enter committing typed text while no suggestion is highlighted.
+ */
+function MultiCombobox<T = string>({
+  value,
+  onValueChange,
+  items,
+  itemToKey = identity,
+  itemToLabel = identity,
+  inputValue,
+  onInputValueChange,
+  placeholder,
+  id,
+  'aria-label': ariaLabel,
+  emptyMessage = 'No matches',
+  allowCustomValues = false,
+  loading = false,
+  error = false,
+  disabled = false,
+  size = 'md',
+  variant = 'box',
+}: MultiComboboxProps<T>) {
+  const cell = variant === 'cell';
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  // Enter is only ours to handle when Base UI has nothing highlighted to commit.
+  const highlightedRef = useRef<T | undefined>(undefined);
+
+  const [open, setOpen] = useState(false);
+  /** Escape was pressed in a `cell`: show the chips, not the box, until it is edited again. */
+  const [dismissed, setDismissed] = useState(false);
+
+  // A chosen item is already on show as a chip, and picking it again would only remove it — which
+  // the chip's own ✕ does, where it is looked for. So the list offers what is left to choose.
+  const offered = items.filter((item) => !value.some((chosen) => itemToKey(chosen) === itemToKey(item)));
+
+  const query = inputValue.trim();
+  // Hint at Enter only once there is something to accept, and only when accepting it
+  // would actually do something — addChip de-duplicates, so a value already held as a
+  // chip would make the hint promise a no-op.
+  const canAddQuery = allowCustomValues && query !== '' && !value.some((item) => itemToKey(item) === query);
+
+  // How the list itself is doing, as opposed to what it contains.
+  const statusContent = loading ? 'Searching…' : error ? 'Could not load suggestions' : null;
+
+  // "No matches" is a claim about a finished search, so it survives neither a search still
+  // running nor one that failed. The Enter hint does survive a failure: adding a custom
+  // value never depended on the suggestions loading.
+  const emptyContent =
+    query === '' || loading ? null : canAddQuery ? `Press Enter to add “${query}”` : error ? null : emptyMessage;
+
+  // Base UI would otherwise open an empty bordered box on focus or a trigger click.
+  const hasContent = offered.length > 0 || emptyContent !== null || statusContent !== null;
+
+  function addChip(keyword: string) {
+    const trimmed = keyword.trim();
+    if (trimmed && !value.some((item) => itemToKey(item) === trimmed)) {
+      // Reachable only under `allowCustomValues`, which is documented as T = string:
+      // a chip typed by hand is the string itself.
+      onValueChange([...value, trimmed as T]);
+    }
+    onInputValueChange('');
+  }
+
+  /**
+   * Replays arrow presses on the input so Base UI's own list navigation moves the
+   * highlight — it owns that state and exposes no way to set an index directly.
+   * Dispatched natively because React's delegated listener picks bubbled events up.
+   *
+   * The count is clamped to the distance actually left in the list: Base UI's navigation
+   * wraps around at the ends, so a fixed number of presses near the bottom would run past
+   * it and back to the top. A page key should stop at the edge instead.
+   */
+  function stepPage(direction: 'ArrowUp' | 'ArrowDown') {
+    const input = inputRef.current;
+    const list = listRef.current;
+    if (!input || !list) return;
+
+    const options = Array.from(list.querySelectorAll('[role="option"]'));
+    if (options.length === 0) return;
+
+    const highlighted = options.findIndex((option) => option.hasAttribute('data-highlighted'));
+    const down = direction === 'ArrowDown';
+    // With nothing highlighted the first press lands on an end, so start one step outside
+    // the list on the side the keys are travelling from.
+    const from = highlighted === -1 ? (down ? -1 : options.length) : highlighted;
+    const target = down ? Math.min(from + PAGE_STEP, options.length - 1) : Math.max(from - PAGE_STEP, 0);
+
+    for (let i = 0; i < Math.abs(target - from); i += 1) {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: direction, bubbles: true, cancelable: true }));
+    }
+  }
+
+  function handleKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'Escape') {
+      // With the list open Base UI closes it, which is all Escape should do. With the list shut
+      // Base UI's Escape **clears the selection** — right for a search box, and here a way to
+      // wipe every chip with the key that means "never mind". That one is stopped, in a form as
+      // much as in a cell.
+      if (!(open && hasContent)) {
+        (event as typeof event & { preventBaseUIHandler: () => void }).preventBaseUIHandler();
+      }
+      if (cell) setDismissed(true);
+      return;
+    }
+    // Any other key is the user editing again. Tab is leaving, which the blur handles.
+    if (cell && event.key !== 'Tab') setDismissed(false);
+    if (event.key === 'PageUp' || event.key === 'PageDown') {
+      // Otherwise the dialog body scrolls out from under the open list.
+      event.preventDefault();
+      stepPage(event.key === 'PageUp' ? 'ArrowUp' : 'ArrowDown');
+      return;
+    }
+    // A highlighted suggestion belongs to Base UI; a bare Enter is a custom value, which
+    // only this branch handles — without the opt-in it does nothing at all.
+    //
+    // Enter and nothing else. Comma is the usual second commit key in a tag input, but not
+    // here: chemistry names are full of them (N,N-dimethylformamide, 1,3-butadiene, 2,4-D)
+    // and committing on comma would make those impossible to type. It is also what the
+    // popup's own `Press Enter to add “…”` hint promises.
+    if (allowCustomValues && event.key === 'Enter' && highlightedRef.current === undefined && inputValue.trim()) {
+      event.preventDefault();
+      addChip(inputValue);
+    }
+  }
+
+  return (
+    <ComboboxPrimitive.Root<T, true>
+      multiple
+      disabled={disabled}
+      open={open && hasContent && !disabled}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (next) setDismissed(false);
+      }}
+      items={offered}
+      // The caller filters server-side; filtering again locally would hide fresh results.
+      filter={null}
+      value={value}
+      onValueChange={onValueChange}
+      itemToStringLabel={itemToLabel}
+      // Object items are not referentially equal across refetches, so identity has to be
+      // spelled out or a chip stops matching its own row in the list.
+      isItemEqualToValue={(a, b) => itemToKey(a) === itemToKey(b)}
+      inputValue={inputValue}
+      onInputValueChange={onInputValueChange}
+      onItemHighlighted={(item) => {
+        highlightedRef.current = item;
+      }}
+    >
+      <ComboboxPrimitive.Chips
+        className={cn(
+          INPUT_BOX,
+          INPUT_BOX_FOCUS_WITHIN,
+          // A `min-h`, not the shell's usual `h-10`: in a `box` the chips wrap, so the field grows.
+          'flex items-center gap-2 px-2',
+          SIZE_CHIPS_BOX[size],
+          cell && !disabled && CELL_CHIPS_BOX,
+          dismissed && CELL_CHIPS_BOX_DISMISSED,
+          disabled && INPUT_DISABLED,
+        )}
+        // A click in a dismissed cell that already holds focus moves no focus, so nothing else
+        // would bring the box back.
+        onMouseDown={cell ? () => setDismissed(false) : undefined}
+      >
+        {/*
+          **The wrapping — a `box`'s; a `cell` never wraps — happens here, not on the field.** Everything used to wrap in one row, so
+          the input's `min-w-24` — which is a floor for wrapping as much as for shrinking — pushed
+          the chevron onto a second line as soon as a chip and that floor outgrew the field. In a
+          table cell one chip was enough. The chevron now sits outside what wraps, as the trailing
+          item of a row that does not, and the chips and input take the space that is left.
+        */}
+        {/* No `min-w-0` on a `cell`: its chips are its minimum width, which is what widens the column. */}
+        <div className={cn('flex flex-1 items-center gap-2', cell ? 'flex-nowrap' : 'min-w-0 flex-wrap')}>
+          {value.map((item) => (
+            <ComboboxPrimitive.Chip
+              key={itemToKey(item)}
+              className={cn(
+                'flex items-center gap-1 rounded-md bg-blue-10 py-0.5 pr-1 pl-2 text-[12px]/5 text-neutral-1000 outline-none data-highlighted:ring-3 data-highlighted:ring-ring/50',
+                cell && 'shrink-0 whitespace-nowrap',
+              )}
+            >
+              {itemToLabel(item)}
+              {/*
+              Base UI already blocks this when the root is disabled (`ComboboxChipRemove` reads
+              `comboboxDisabled || disabledProp`), and marks it `aria-disabled` + `data-disabled`
+              rather than using the native attribute. Passing `disabled` explicitly says so at
+              this level too; the styling is the part that was actually missing, since the button
+              otherwise kept its pointer cursor and hover background and looked live.
+            */}
+              <ComboboxPrimitive.ChipRemove
+                aria-label={`Remove ${itemToLabel(item)}`}
+                disabled={disabled}
+                className={cn(
+                  'rounded-full p-0.5 text-neutral-700',
+                  cell && CELL_BOX_ONLY,
+                  dismissed && CELL_BOX_ONLY_DISMISSED,
+                  disabled ? 'pointer-events-none' : 'cursor-pointer hover:bg-blue-100 hover:text-neutral-1000',
+                )}
+              >
+                <X className="size-3.5" />
+              </ComboboxPrimitive.ChipRemove>
+            </ComboboxPrimitive.Chip>
+          ))}
+          <ComboboxPrimitive.Input
+            id={id}
+            ref={inputRef}
+            aria-label={ariaLabel}
+            placeholder={value.length === 0 ? placeholder : undefined}
+            onKeyDown={handleKeyDown}
+            onBlur={cell ? () => setDismissed(false) : undefined}
+            className={cn(
+              'flex-1 bg-transparent text-neutral-1000 outline-none placeholder:text-neutral-700',
+              SIZE_INPUT_MIN[size],
+              SIZE_TEXT[size],
+              // `w-4`: an `<input>` is some twenty characters wide by default, and with nothing
+              // letting the row shrink that became empty space the column had to make room for.
+              // A stated width is all it reserves now; `flex-1` still hands it whatever is spare.
+              // `min-w-4` overrides `SIZE_INPUT_MIN`, which would otherwise hold it at 40px.
+              cell && 'w-4 min-w-4 focus:placeholder:text-transparent',
+              // No caret blinking beside chips that are being shown rather than edited.
+              // …and the em-dash of an empty one back, which focus had hidden.
+              dismissed && 'caret-transparent focus:placeholder:text-neutral-700!',
+            )}
+          />
+        </div>
+        {/*
+          The chevron stays put while suggestions load. A spinner at the right edge of a field
+          means **this field is being saved** — that is what `SavingOverlay` puts there — so
+          borrowing the same spot for a lookup would say the wrong thing. The wait is reported
+          inside the popup instead, plus `aria-busy` here.
+
+          When a save *is* in flight the chevron gets out of the way: `SavingOverlay` publishes
+          `data-saving` on the group around this. `invisible` rather than `hidden`, so the row
+          keeps its width and the spinner lands exactly where the chevron was.
+        */}
+        <ComboboxPrimitive.Trigger
+          aria-label="Show suggestions"
+          aria-busy={loading || undefined}
+          // The tighter inset is deliberate: `p-1` next to the chips crowds them.
+          className={cn(INPUT_ACTION, 'shrink-0 p-0.5', cell && CELL_BOX_ONLY, dismissed && CELL_BOX_ONLY_DISMISSED)}
+        >
+          <ChevronDown className="size-5" />
+        </ComboboxPrimitive.Trigger>
+      </ComboboxPrimitive.Chips>
+
+      <PopupContent
+        items={offered}
+        itemToKey={itemToKey}
+        itemToLabel={itemToLabel}
+        statusContent={statusContent}
+        emptyContent={emptyContent}
+        error={error}
+        loading={loading}
+        size={size}
+        fitContent={cell}
+        listRef={listRef}
+      />
+    </ComboboxPrimitive.Root>
+  );
+}
+
+export { MultiCombobox };

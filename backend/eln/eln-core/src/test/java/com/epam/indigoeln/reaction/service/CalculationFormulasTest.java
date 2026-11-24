@@ -1,0 +1,441 @@
+package com.epam.indigoeln.reaction.service;
+
+import com.epam.indigoeln.common.model.Page;
+import com.epam.indigoeln.common.model.Paging;
+import com.epam.indigoeln.common.util.ModelUtil;
+import com.epam.indigoeln.compound.model.SampleDTO;
+import com.epam.indigoeln.compound.model.search.FindSamplesRequest;
+import com.epam.indigoeln.compound.model.search.SearchCatalog;
+import com.epam.indigoeln.eln.ELNBaseTest;
+import com.epam.indigoeln.eln.model.BuiltInDictionary;
+import com.epam.indigoeln.eln.model.SaltCodeRef;
+import com.epam.indigoeln.eln.model.StereoisomerCodeRef;
+import com.epam.indigoeln.reaction.model.OutputSampleAnchor;
+import com.epam.indigoeln.reaction.model.mutation.ReactionInputMutation;
+import com.epam.indigoeln.reaction.model.mutation.ReactionMutation;
+import com.epam.indigoeln.reaction.model.mutation.ReactionOutputMutation;
+import com.epam.indigoeln.reaction.model.mutation.ReactionOutputSampleMutation;
+import com.epam.indigoeln.sampleregistration.model.SRSCompoundDTO;
+import com.epam.indigoeln.sampleregistration.model.SRSSampleDTO;
+import com.epam.indigoeln.sampleregistration.model.STRCodeCompound;
+import com.epam.indigoeln.sampleregistration.model.STRCodeSample;
+import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.security.TestSecurity;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInfo;
+
+import java.io.File;
+import java.math.BigDecimal;
+import java.util.List;
+import java.util.UUID;
+
+import static com.epam.indigoeln.common.model.units.MolUnit.MOL;
+import static com.epam.indigoeln.common.model.units.VolumeUnit.ML;
+import static com.epam.indigoeln.common.model.units.WeightUnit.G;
+import static com.epam.indigoeln.eln.test.EnteredValueAssert.assertThat;
+import static com.epam.indigoeln.eln.test.ReactionInputAssert.assertThat;
+import static com.epam.indigoeln.eln.test.ReactionInputSampleAssert.assertThat;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doReturn;
+
+@QuarkusTest
+@TestSecurity(user = ELNBaseTest.JOHN_USERNAME)
+public class CalculationFormulasTest extends MutationsTestBase {
+
+    SaltCodeRef saltCode;
+    StereoisomerCodeRef stereoisomerCode;
+    SaltCodeRef defaultSaltCode;
+    StereoisomerCodeRef defaultStereoisomerCode;
+
+    @BeforeAll
+    void beforeAll() {
+        saltCode = dictionaryClient.getNthNonDefault(BuiltInDictionary.SALT_CODE, 1);
+        stereoisomerCode = dictionaryClient.getNthNonDefault(BuiltInDictionary.STEREOISOMER_CODE, 1);
+        defaultSaltCode = dictionaryClient.getDefault(BuiltInDictionary.SALT_CODE);
+        defaultStereoisomerCode = dictionaryClient.getDefault(BuiltInDictionary.STEREOISOMER_CODE);
+    }
+
+    @BeforeEach
+    void setUp(TestInfo testInfo) {
+        initExperiment("MutationsTest");
+    }
+
+    @AfterEach
+    void tearDown(TestInfo testInfo) throws Exception {
+        experiment.generateDetailsReport(new File("build/experiment-" + testInfo.getTestMethod().get().getName() + ".html"));
+    }
+
+
+    @Test
+    // F1.1. input.mol = ∑ sample.mol
+    void testF1_1() {
+        experiment.mutateSetSchemeFromResource("/reaction-testCase1.rxn");
+        experiment.mutateSetInputMol(1, 1, "2");
+
+        assertThat(experiment.input(1)).hasMol(2.0, MOL);
+    }
+
+    @Test
+    // F1.2. sample.mol = input.mol - ∑ otherSample.mol
+    void testF1_2() {
+        experiment.mutateSetSchemeFromResource("/reaction-testCase1.rxn");
+        experiment.mutateSetInputRowMol(1, "2");
+
+        assertThat(experiment.inputSample(1, 1)).hasMol(2.0, MOL);
+    }
+
+    @Test
+    // F2.1. nonLimiting.mol = limiting.mol / limiting.eq * nonLimiting.eq
+    void testF2_1() {
+        experiment.mutateSetSchemeFromResource("/reaction-testCase1.rxn");
+        experiment.mutateSetInputRowMol(1, "6");
+        experiment.mutateSetInputRowEQ(1, "2");
+        experiment.mutateSetInputRowEQ(2, "3");
+
+        assertThat(experiment.input(2)).hasMol(9.0, MOL);
+    }
+
+    @Test
+    // F2.2. nonLimiting.eq = nonLimiting.mol / limiting.mol * limiting.eq
+    void testF2_2() {
+        experiment.mutateSetSchemeFromResource("/reaction-testCase1.rxn");
+        experiment.mutateSetInputRowMol(2, "6");
+        experiment.mutateSetInputRowEQ(1, "2");
+        experiment.mutateSetInputRowMol(1, "3");
+
+        assertThat(experiment.input(2)).hasEq(4.0);
+    }
+
+/*
+    @Test
+    // F2.3. limiting.eq = limiting.mol * nonLimiting.eq / nonLimiting.mol
+    void testF2_3() {
+        experiment.mutateSetSchemeFromResource("/reaction-testCase1.rxn");
+        experiment.mutateSetInputRowMol(1, "6", MOL);
+        experiment.mutateSetInputRowEQ(2, "2");
+        experiment.mutateSetInputRowMol(2, "3", MOL);
+
+        assertThat(experiment.input(1)).hasEq(4.0);
+    }
+*/
+
+    @Test
+    // F3.1. sample.mol = sample.weight * sample.purity / molWeight
+    void testF3_1() {
+        experiment.mutateAddEmptyInput();
+        experiment.mutateSetInputWeight(1, 1, "100");
+        experiment.mutateSetInputPurity(1, 1, "50");
+        experiment.mutate(new ReactionInputMutation.SetInputCompoundMolWeight(experiment.input(1).getAnchor(), "200"));
+
+        assertThat(experiment.inputSample(1, 1)).hasMol(0.25, MOL);
+    }
+
+    @Test
+    // F3.2. sample.weight = sample.mol * molWeight / sample.purity
+    void testF3_2() {
+        experiment.mutateAddEmptyInput();
+        experiment.mutateSetInputMol(1, 1, "10");
+        experiment.mutate(new ReactionInputMutation.SetInputCompoundMolWeight(experiment.input(1).getAnchor(), "200"));
+        experiment.mutateSetInputPurity(1, 1, "50");
+
+        assertThat(experiment.inputSample(1, 1)).hasWeight(4000, G);
+    }
+
+    @Test
+    // F3.3. sample.actualMol = sample.actualWeight * sample.purity / molWeight
+    void testF3_3() {
+        experiment.mutateAddNoProductSample();
+        OutputSampleAnchor os = experiment.outputSample(1, 1).getAnchor();
+        experiment.mutate(new ReactionOutputSampleMutation.SetOutputActualWeight(os, "100"));
+        experiment.mutate(new ReactionOutputSampleMutation.SetOutputPurity(os, "50"));
+        experiment.mutate(new ReactionOutputMutation.SetOutputCompoundMolWeight(experiment.output(1).getAnchor(), "25"));
+
+        assertThat(experiment.outputSample(1, 1).getActualMol()).hasValue(2);
+    }
+
+    @Test
+    // F3.4. sample.actualWeight = sample.actualMol * molWeight / sample.purity
+    void testF3_4() {
+        experiment.mutateAddNoProductSample();
+        OutputSampleAnchor os = experiment.outputSample(1, 1).getAnchor();
+        experiment.mutate(new ReactionOutputSampleMutation.SetOutputActualMol(os, "2"));
+        experiment.mutate(new ReactionOutputMutation.SetOutputCompoundMolWeight(experiment.output(1).getAnchor(), "25"));
+        experiment.mutate(new ReactionOutputSampleMutation.SetOutputPurity(os, "50"));
+
+        assertThat(experiment.outputSample(1, 1).getActualWeight()).hasValue(100);
+    }
+
+    @Test
+    // F4.1. sample.mol = sample.molarity * sample.volume
+    void testF4_1() {
+        experiment.mutateAddEmptyInput();
+        experiment.mutateSetInputMolarity(1, 1, "10");
+        experiment.mutateSetInputVolume(1, 1, "20000");
+
+        assertThat(experiment.inputSample(1, 1).getMol()).hasValue(200);
+    }
+
+    @Test
+    // F4.2 disabled: molarity is never calculated
+    void testF4_2() {
+        experiment.mutateAddEmptyInput();
+        experiment.mutateSetInputMol(1, 1, "10");
+        experiment.mutateSetInputVolume(1, 1, "0.02");
+
+        assertThat(experiment.inputSample(1, 1).getMolarity()).isEmpty();
+    }
+
+    @Test
+    // F4.3. sample.volume = sample.mol / sample.molarity
+    void testF4_3() {
+        experiment.mutateAddEmptyInput();
+        experiment.mutateSetInputMol(1, 1, "10");
+        experiment.mutateSetInputMolarity(1, 1, "20");
+
+        assertThat(experiment.inputSample(1, 1).getVolume()).hasValue(500);
+    }
+
+    @Test
+    // F4.4. sample.actualMol = sample.molarity * sample.volume
+    void testF4_4() {
+        experiment.mutateAddNoProductSample();
+        OutputSampleAnchor os = experiment.outputSample(1, 1).getAnchor();
+        experiment.mutate(new ReactionOutputSampleMutation.SetOutputMolarity(os, "10"));
+        experiment.mutate(new ReactionOutputSampleMutation.SetOutputVolume(os, "20000"));
+
+        assertThat(experiment.outputSample(1, 1).getActualMol()).hasValue(200);
+    }
+
+    @Test
+    // F4.5 disabled: molarity is never calculated
+    void testF4_5() {
+        experiment.mutateAddNoProductSample();
+        OutputSampleAnchor os = experiment.outputSample(1, 1).getAnchor();
+        experiment.mutate(new ReactionOutputSampleMutation.SetOutputActualMol(os, "10"));
+        experiment.mutate(new ReactionOutputSampleMutation.SetOutputVolume(os, "20000"));
+
+        assertThat(experiment.outputSample(1, 1).getMolarity()).isEmpty();
+    }
+
+    @Test
+    // F4.6. sample.volume = sample.actualMol / sample.molarity
+    void testF4_6() {
+        experiment.mutateAddNoProductSample();
+        OutputSampleAnchor os = experiment.outputSample(1, 1).getAnchor();
+        experiment.mutate(new ReactionOutputSampleMutation.SetOutputActualMol(os, "10"));
+        experiment.mutate(new ReactionOutputSampleMutation.SetOutputMolarity(os, "20"));
+
+        assertThat(experiment.outputSample(1, 1).getVolume()).hasValue(500);
+    }
+
+    @Test
+    // F5.1. sample.weight = sample.volume * sample.density
+    void testF5_1() {
+        experiment.mutateAddEmptyInput();
+        experiment.mutateSetInputVolume(1, 1, "10");
+        experiment.mutateSetInputDensity(1, 1, "20");
+
+        assertThat(experiment.inputSample(1, 1).getWeight()).hasValue(200);
+    }
+
+    @Test
+    // F5.2. sample.volume = sample.weight / sample.density
+    void testF5_2() {
+        experiment.mutateAddEmptyInput();
+        experiment.mutateSetInputWeight(1, 1, "10");
+        experiment.mutateSetInputDensity(1, 1, "20");
+
+        assertThat(experiment.inputSample(1, 1).getVolume()).hasValue(0.5);
+    }
+
+    @Test
+    // F5.3 disabled: density is never calculated
+    void testF5_3() {
+        experiment.mutateAddEmptyInput();
+        experiment.mutateSetInputWeight(1, 1, "10");
+        experiment.mutateSetInputVolume(1, 1, "20");
+
+        assertThat(experiment.inputSample(1, 1).getDensity()).isEmpty();
+    }
+
+    @Test
+    // F5.4. sample.actualWeight = sample.volume * sample.density
+    void testF5_4() {
+        experiment.mutateAddNoProductSample();
+        OutputSampleAnchor os = experiment.outputSample(1, 1).getAnchor();
+        experiment.mutate(new ReactionOutputSampleMutation.SetOutputVolume(os, "10"));
+        experiment.mutate(new ReactionOutputSampleMutation.SetOutputDensity(os, "20"));
+
+        assertThat(experiment.outputSample(1, 1).getActualWeight()).hasValue(200);
+    }
+
+    @Test
+    // F5.5. sample.volume = sample.actualWeight / sample.density
+    void testF5_5() {
+        experiment.mutateAddNoProductSample();
+        OutputSampleAnchor os = experiment.outputSample(1, 1).getAnchor();
+        experiment.mutate(new ReactionOutputSampleMutation.SetOutputActualWeight(os, "10"));
+        experiment.mutate(new ReactionOutputSampleMutation.SetOutputDensity(os, "20"));
+
+        assertThat(experiment.outputSample(1, 1).getVolume()).hasValue(0.5);
+    }
+
+    @Test
+    // F5.6 disabled: density is never calculated
+    void testF5_6() {
+        experiment.mutateAddNoProductSample();
+        OutputSampleAnchor os = experiment.outputSample(1, 1).getAnchor();
+        experiment.mutate(new ReactionOutputSampleMutation.SetOutputActualWeight(os, "10"));
+        experiment.mutate(new ReactionOutputSampleMutation.SetOutputVolume(os, "20"));
+
+        assertThat(experiment.outputSample(1, 1).getDensity()).isEmpty();
+    }
+
+    @Test
+    // F6.1. output.theoMol = limiting.mol / limiting.eq * output.eq
+    void testF6_1() {
+        experiment.mutateAddEmptyInput();
+        experiment.mutateSetInputRowMol(1, "10");
+        experiment.mutateSetInputRowEQ(1, "2");
+        experiment.mutateAddNoProductSample();
+        experiment.mutate(new ReactionOutputMutation.SetOutputRowEQ(experiment.output(1).getAnchor(), "4"));
+
+        assertThat(experiment.output(1).getTheoMol()).hasValue(20);
+    }
+
+    @Test
+    // F7.1. output.theoWeight = output.theoMol * molWeight
+    void testF7_1() {
+        experiment.mutateAddEmptyInput();
+        experiment.mutateAddNoProductSample();
+        experiment.mutateSetInputRowMol(1, "10");
+
+        assertThat(experiment.output(1).getTheoMol()).hasValue(10);
+
+        experiment.mutate(new ReactionOutputMutation.SetOutputCompoundMolWeight(experiment.output(1).getAnchor(), "100"));
+
+        assertThat(experiment.output(1).getTheoWeight()).hasValue(1000);
+    }
+
+    @Test
+    // F8. outputSample.yield = outputSample.actualMol / output.theoMol
+    void testF8_1() {
+        experiment.mutateAddEmptyInput();
+        experiment.mutateAddNoProductSample();
+        OutputSampleAnchor os = experiment.outputSample(1, 1).getAnchor();
+        experiment.mutateSetInputRowMol(1, "10");
+
+        assertThat(experiment.output(1).getTheoMol()).hasValue(10);
+
+        experiment.mutate(new ReactionOutputSampleMutation.SetOutputActualMol(os, "6"));
+
+        assertThat(experiment.outputSample(1, 1).getYieldValue()).hasValue(60);
+    }
+
+    @Test
+    // F8.2. outputSample.actualMol = outputSample.yield * output.theoMol
+    void testF8_2() {
+        experiment.mutateAddEmptyInput();
+        experiment.mutateAddNoProductSample();
+        OutputSampleAnchor os = experiment.outputSample(1, 1).getAnchor();
+
+        // theoMol = limiting.mol / limiting.eq * eq
+        experiment.mutateSetInputRowMol(1, "20");
+        experiment.mutate(new ReactionOutputMutation.SetOutputCompoundMolWeight(experiment.output(1).getAnchor(), "50"));
+        assertThat(experiment.output(1).getTheoMol()).hasValue(20);
+        assertThat(experiment.output(1).getTheoWeight()).hasValue(1000);
+
+        // yield = actualWeight * purity / theoWeight
+        experiment.mutate(new ReactionOutputSampleMutation.SetOutputActualWeight(os, "10"));
+        assertThat(experiment.outputSample(1, 1).getYieldValue()).hasValue(1);
+
+        // actualMol = yield * theoMol
+        assertThat(experiment.outputSample(1, 1).getActualMol()).hasValue(0.2);
+    }
+
+    @Test
+    // F9.1. outputSample.yield = outputSample.actualWeight * outputSample.purity / output.theoWeight
+    void testF9_1() {
+        experiment.mutateAddEmptyInput();
+        experiment.mutateAddNoProductSample();
+        OutputSampleAnchor os = experiment.outputSample(1, 1).getAnchor();
+        experiment.mutateSetInputRowMol(1, "10");
+
+        assertThat(experiment.output(1).getTheoMol()).hasValue(10);
+
+        experiment.mutate(new ReactionOutputSampleMutation.SetOutputActualWeight(os, "20"));
+        experiment.mutate(new ReactionOutputSampleMutation.SetOutputPurity(os, "50"));
+        experiment.mutate(new ReactionOutputMutation.SetOutputCompoundMolWeight(experiment.output(1).getAnchor(), "100"));
+
+        assertThat(experiment.outputSample(1, 1).getYieldValue()).hasValue(1);
+    }
+
+    @Test
+    // F9.2. outputSample.actualWeight = outputSample.yield / outputSample.purity * output.theoWeight
+    void testF9_2() {
+        experiment.mutateAddEmptyInput();
+        experiment.mutateAddNoProductSample();
+        OutputSampleAnchor os = experiment.outputSample(1, 1).getAnchor();
+
+        // theoMol = limiting.mol
+        experiment.mutateSetInputRowMol(1, "10");
+        assertThat(experiment.output(1).getTheoMol()).hasValue(10);
+
+        // theoWeight = theoMol * molWeight
+        experiment.mutate(new ReactionOutputMutation.SetOutputCompoundMolWeight(experiment.output(1).getAnchor(), "50"));
+        assertThat(experiment.output(1).getTheoWeight()).hasValue(500);
+
+        // yield = actualMol / theoMol
+        experiment.mutate(new ReactionOutputSampleMutation.SetOutputActualMol(os, "2"));
+        assertThat(experiment.outputSample(1, 1).getYieldValue()).hasValue(20);
+
+        // actualWeight = yield / purity * theoWeight
+        assertThat(experiment.outputSample(1, 1).getActualWeight()).hasValue(100);
+    }
+
+    @Test
+    // F10.1. input.weight = ∑ sample.weight
+    void testF10_1() {
+        addInputWithTwoSamples();
+        experiment.mutateSetInputWeight(1, 1, "100");
+        assertThat(experiment.input(1)).hasNoWeight();
+
+        experiment.mutateSetInputWeight(1, 2, "0.5");
+        assertThat(experiment.input(1)).hasWeight(100.5, G);
+
+        experiment.mutateSetInputWeight(1, 1, null);
+        assertThat(experiment.input(1)).hasNoWeight();
+    }
+
+    @Test
+    // F11.1. input.volume = ∑ sample.volume
+    void testF11_1() {
+        addInputWithTwoSamples();
+        experiment.mutateSetInputVolume(1, 1, "2000");
+        assertThat(experiment.input(1)).hasNoVolume();
+
+        experiment.mutateSetInputVolume(1, 2, "500");
+        assertThat(experiment.input(1)).hasVolume(2500, ML);
+
+        experiment.mutateSetInputVolume(1, 1, null);
+        assertThat(experiment.input(1)).hasNoVolume();
+    }
+
+    private void addInputWithTwoSamples() {
+        UUID compoundID = UUID.randomUUID();
+        SRSSampleDTO sample1 = new SRSSampleDTO(UUID.randomUUID(), compoundID, defaultSaltCode.getId(), new STRCodeCompound(1, 1), new STRCodeSample(1, 1, 1), "C9H17NO4", BigDecimal.ONE);
+        SRSSampleDTO sample2 = new SRSSampleDTO(UUID.randomUUID(), compoundID, defaultSaltCode.getId(), new STRCodeCompound(1, 1), new STRCodeSample(1, 1, 2), "C9H17NO4", BigDecimal.ONE);
+        doReturn(Page.of(Paging.DEFAULT, 2, List.of(sample1, sample2))).when(sampleRegistrationClient).find(any(), any());
+        SRSCompoundDTO compound = new SRSCompoundDTO("C", defaultStereoisomerCode.getId(), defaultSaltCode.getId(), ModelUtil.loadResourceAsString("/ring-substructure.mol"));
+        doReturn(compound).when(sampleRegistrationClient).getCompound(any());
+
+        List<SampleDTO> samples = compoundClient.search(new FindSamplesRequest().withCatalog(SearchCatalog.SRS), Paging.DEFAULT).getItems();
+        experiment.mutate(new ReactionMutation.AddInput(experiment.reaction().getAnchor(), samples.get(0)));
+        experiment.mutate(new ReactionMutation.AddInput(experiment.reaction().getAnchor(), samples.get(1)));
+        assertThat(experiment.input(1).getSamples()).hasSize(2);
+    }
+}

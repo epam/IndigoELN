@@ -1,0 +1,114 @@
+export type AccessLevel = 'NONE' | 'IMPLICIT_VIEW' | 'VIEW' | 'EDIT' | 'ADMIN' | 'AUTHOR';
+
+export interface UserRef {
+  username: string;
+  displayName: string;
+}
+
+export interface ACLEntry {
+  username: string;
+  displayName: string;
+  level: AccessLevel;
+  inherited: boolean;
+}
+
+export type UUID = string;
+
+/** An ISO-8601 instant — how Jackson serialises the backend's `Instant` fields. */
+export type DateString = string;
+
+export interface BaseDTO {
+  id: UUID;
+  createdBy: UserRef;
+  createdAt: DateString;
+  modifiedBy: UserRef;
+  modifiedAt: DateString;
+}
+
+export interface Attachment extends BaseDTO {
+  name: string;
+  size: number;
+}
+
+export interface Page<T> {
+  pageNo: number;
+  pageSize: number;
+  /** Null when the backend did not count, e.g. global search pages after the first. */
+  totalItems: number | null;
+  totalPages: number | null;
+  /** Whether a page after this one exists; set on every page, unlike the totals. */
+  hasMore: boolean;
+  items: T[];
+}
+
+/** Sort and layout choices are the same on every entity list (projects, notebooks, experiments). */
+export const SORT_ORDERS = ['EARLIEST', 'LATEST'] as const;
+export type SortOrder = (typeof SORT_ORDERS)[number];
+
+export const SORT_LABELS: Record<SortOrder, string> = {
+  EARLIEST: 'Earliest',
+  LATEST: 'Latest',
+};
+
+export const COLLECTION_VIEWS = ['grid', 'list'] as const;
+export type CollectionView = (typeof COLLECTION_VIEWS)[number];
+
+/**
+ * What every paged entity list is filtered by. One type rather than one per entity: the
+ * projects and notebooks resources declare the identical query params, and `ActionBar` — the
+ * single control that sets all three — is entity-agnostic too.
+ */
+export interface CollectionFilters {
+  search: string;
+  sort: SortOrder;
+  createdByMe: boolean;
+}
+
+/**
+ * Access levels as the UI speaks about them.
+ * `AUTHOR` is the creator's own entry: the backend never lets it change,
+ * so it is shown but never offered.
+ */
+export const ACL_LEVEL_LABELS: Record<AccessLevel, string> = {
+  ADMIN: 'Admin',
+  EDIT: 'Can Edit',
+  VIEW: 'Can View',
+  IMPLICIT_VIEW: 'Limited View',
+  NONE: 'None',
+  AUTHOR: 'Author',
+};
+
+export function isImmutableLevel(level: AccessLevel): boolean {
+  return level === 'AUTHOR';
+}
+
+/**
+ * A level nobody grants: `IMPLICIT_VIEW` is derived from access to something nested, and
+ * `ACLService.applyAccess` refuses to assign it. A member holding it has no entry of this entity's
+ * own — they can be promoted, which adds one, but are never offered it.
+ */
+export function isDerivedLevel(level: AccessLevel): boolean {
+  return level === 'IMPLICIT_VIEW';
+}
+
+/**
+ * What the level menu offers: no immutable or derived level, and not `NONE`, which is not a level
+ * a member is left at but the menu's separate Remove Member action.
+ */
+export const ELIGIBLE_ACL_LEVELS = (Object.keys(ACL_LEVEL_LABELS) as AccessLevel[]).filter(
+  (level) => !isImmutableLevel(level) && !isDerivedLevel(level) && level !== 'NONE',
+);
+
+/**
+ * Mirrors `DocumentStatus` (common/model) — the **signing workflow's** states, carried by the
+ * `SignatureUpdated` mutation. Five of the nine `ExperimentStatus` values are named the same and
+ * are set from these; the two enums are not interchangeable.
+ */
+export type DocumentStatus = 'SUBMITTED' | 'SIGNING' | 'SIGNED' | 'REJECTED' | 'CANCELLED';
+
+/** One entry of the `POST /access` body. The backend upserts per entry, so send only what changed. */
+export interface AccessForm {
+  username: string;
+  level: AccessLevel;
+  deleteNested?: boolean;
+}

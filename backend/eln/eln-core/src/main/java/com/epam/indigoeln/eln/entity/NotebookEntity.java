@@ -1,0 +1,130 @@
+package com.epam.indigoeln.eln.entity;
+
+import com.epam.indigoeln.eln.config.hibernate.ExperimentCountArrayType;
+import com.epam.indigoeln.eln.common.config.SearchVectorType;
+import com.epam.indigoeln.eln.model.AccessLevel;
+import com.epam.indigoeln.eln.model.ExperimentStatus;
+import com.epam.indigoeln.eln.common.util.SearchVector;
+import jakarta.persistence.*;
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.NamedEntityGraph;
+import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import lombok.*;
+import org.hibernate.annotations.*;
+import org.hibernate.dialect.type.PostgreSQLEnumJdbcType;
+import org.jspecify.annotations.Nullable;
+
+import java.util.*;
+
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@ToString(of = {"id", "name"}, includeFieldNames = false)
+@Entity(name = "Notebook")
+@SecondaryTable(name = "Notebook_Access_View",
+        pkJoinColumns = @PrimaryKeyJoinColumn(name = "notebook_id", referencedColumnName = "id")
+)
+@NamedEntityGraph(
+        name = "Notebook.list",
+        attributeNodes = {
+                @NamedAttributeNode("createdBy"),
+                @NamedAttributeNode("modifiedBy"),
+                @NamedAttributeNode("experimentCount")
+        }
+)
+@NamedEntityGraph(
+        name = "Notebook.details",
+        attributeNodes = {
+                @NamedAttributeNode("createdBy"),
+                @NamedAttributeNode("modifiedBy"),
+                @NamedAttributeNode("experimentCount"),
+                @NamedAttributeNode("currentAccessOrNull")
+        }
+)
+@NamedEntityGraph(
+        name = "Notebook.withACL",
+        attributeNodes = {
+                @NamedAttributeNode("aclEntities"),
+                @NamedAttributeNode("implicitUsers"),
+                @NamedAttributeNode("experiments")
+        }
+)
+@DynamicUpdate
+public class NotebookEntity extends BaseEntity implements WithAttachments<NotebookAttachment>, WithACL<NotebookACLEntity, ProjectEntity>, WithRevision {
+
+    @NotNull
+    @ManyToOne
+    @JoinColumn(updatable = false)
+    private ProjectEntity project;
+
+    @NotEmpty
+    @Pattern(regexp = "^\\d{8}$", message = "Notebook Name is invalid, use 8 digits only")
+    private String name;
+
+    @NotNull
+    private Integer revision;
+
+    @Nullable
+    @Basic(fetch = FetchType.LAZY)
+    private String description;
+
+    @NotNull
+    @Basic(fetch = FetchType.LAZY)
+    @LazyGroup("searchVector")
+    @Type(SearchVectorType.class)
+    @Column(name = "search_vector", columnDefinition = "tsvector")
+    @ColumnTransformer(write = "calculate_tsvector(?)")
+    private SearchVector searchVector;
+
+    @NotNull
+    @OneToMany(mappedBy = "notebook")
+    private Set<ExperimentEntity> experiments = HashSet.newHashSet(0);
+
+    @NotNull
+    @OneToMany(mappedBy = "notebook", cascade = CascadeType.ALL, orphanRemoval = true)
+    @MapKeyJoinColumn(name = "user_id")
+    private Map<UserEntity, NotebookACLEntity> aclEntities = HashMap.newHashMap(0);
+
+    @NotNull
+    @ManyToMany
+    @JoinTable(name = "Notebook_Implicit_Access", joinColumns = @JoinColumn(name = "notebook_id"), inverseJoinColumns = @JoinColumn(name = "user_id"))
+    private Set<UserEntity> implicitUsers = HashSet.newHashSet(0);
+
+    @NotNull
+    @OneToMany(mappedBy = "parent")
+    @OrderBy("createdAt")
+    private List<NotebookAttachment> attachments = new ArrayList<>(0);
+
+    @NotNull
+    @Basic(fetch = FetchType.LAZY)
+    @Column(insertable = false, updatable = false)
+    @Type(ExperimentCountArrayType.class)
+    private Map<ExperimentStatus, Integer> experimentCount = Map.of();
+
+    @Nullable
+    @Basic(fetch = FetchType.LAZY)
+    @Column(table = "Notebook_Access_View", insertable = false, updatable = false)
+    @JdbcType(PostgreSQLEnumJdbcType.class)
+    @Fetch(FetchMode.SELECT)
+    @LazyGroup("access_view")
+    private AccessLevel currentAccessOrNull;
+
+    @Override
+    public void insertACL(UserEntity user, AccessLevel access) {
+        getAclEntities().put(user, new NotebookACLEntity(this, user, access));
+    }
+
+    @Override
+    @Transient
+    public ProjectEntity getACLParent() {
+        return project;
+    }
+
+    @Transient
+    public AccessLevel getCurrentAccess() {
+        return currentAccessOrNull != null ? currentAccessOrNull : AccessLevel.NONE;
+    }
+}

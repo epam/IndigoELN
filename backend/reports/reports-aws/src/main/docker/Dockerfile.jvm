@@ -1,0 +1,20 @@
+FROM registry.access.redhat.com/ubi9/openjdk-25
+
+ENV LANGUAGE='en_US:en'
+
+COPY --chown=185 build/quarkus-app/lib/ /deployments/lib/
+COPY --chown=185 build/quarkus-app/*.jar /deployments/
+COPY --chown=185 build/quarkus-app/app/ /deployments/app/
+COPY --chown=185 build/quarkus-app/quarkus/ /deployments/quarkus/
+COPY --chown=185 build/licenses/ /licenses/
+# LGPL-3.0 (JasperReports) must be accompanied by the GPL-3.0 text; the base image has it.
+RUN cp /usr/share/licenses/grep/COPYING /licenses/GPL-3.0.txt
+
+EXPOSE 8080
+USER 185
+# CVE-2026-114938 mitigation: disable vulnerable AVX-512 Base64 intrinsic; drop once base image ships fixed JDK.
+# On the command line rather than in JAVA_TOOL_OPTIONS, which makes the JVM print a non-JSON notice to stderr.
+ENV JAVA_OPTS_APPEND="-Dquarkus.http.host=0.0.0.0 -Djava.util.logging.manager=org.jboss.logmanager.LogManager -XX:-UseBASE64Intrinsics"
+ENV JAVA_APP_JAR="/deployments/quarkus-run.jar"
+
+ENTRYPOINT ["/opt/jboss/container/java/run/run-java.sh"]

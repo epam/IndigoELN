@@ -1,0 +1,50 @@
+package com.epam.indigoeln.eln.mapper;
+
+import com.epam.indigoeln.eln.entity.NotebookEntity;
+import com.epam.indigoeln.eln.entity.NotebookRevisionEntity;
+import com.epam.indigoeln.eln.model.*;
+import com.epam.indigoeln.eln.service.RevisionService;
+import com.epam.indigoeln.reaction.model.mutation.NotebookMutation;
+import jakarta.inject.Inject;
+import org.mapstruct.AfterMapping;
+import org.mapstruct.Mapper;
+import org.mapstruct.Mapping;
+import org.mapstruct.MappingTarget;
+import org.mapstruct.NullValueCheckStrategy;
+import org.mapstruct.ReportingPolicy;
+
+import java.util.List;
+import java.util.Set;
+
+@Mapper(componentModel = "cdi", unmappedTargetPolicy = ReportingPolicy.ERROR, nullValueCheckStrategy =  NullValueCheckStrategy.ALWAYS)
+public abstract class NotebookMapper extends AbstractMapper {
+
+    @Inject
+    RevisionService revisionService;
+
+    public abstract NotebookMutation.CreateNotebook requestToMutation(NotebookRequest request);
+    public abstract NotebookMutation.EditNotebookAttributes requestToMutation(NotebookEditRequest request);
+
+    @Mapping(target = "acl", ignore = true)
+    @Mapping(target = "aclCount", ignore = true)
+    @Mapping(target = "experimentCountByStatus", source = "entity.experimentCount")
+    public abstract NotebookDTO entityToDTO(NotebookEntity entity);
+
+    @AfterMapping
+    protected void mapShortACL(NotebookEntity entity, @MappingTarget NotebookDTO dto) {
+        mapShortACL(entity, dto::setAcl, dto::setAclCount);
+    }
+
+    @Mapping(target = "acl", source = "entity.effectiveACL")
+    @Mapping(target = "experimentCountByStatus", source = "entity.experimentCount")
+    @Mapping(target = "projectId", source = "entity.project.id")
+    @Mapping(target = "projectName", source = "entity.project.name")
+    public abstract NotebookDetailsDTO entityToDetailsDTO(NotebookEntity entity, Set<ApplicationPermission> currentPermissions);
+
+    @Mapping(target = "date", source = "datetime")
+    @Mapping(target = "dateTo", ignore = true)
+    @Mapping(target = "revisionTo", ignore = true)
+    @Mapping(target = "details", ignore = true)
+    public abstract RevisionSummaryDTO revisionToDTO(NotebookRevisionEntity entity);
+    public abstract List<RevisionSummaryDTO> revisionToDTOList(List<NotebookRevisionEntity> entity);
+}

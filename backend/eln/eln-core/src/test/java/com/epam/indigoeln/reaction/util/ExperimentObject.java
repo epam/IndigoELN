@@ -1,0 +1,246 @@
+package com.epam.indigoeln.reaction.util;
+
+import com.epam.indigoeln.common.model.Page;
+import com.epam.indigoeln.common.model.Paging;
+import com.epam.indigoeln.common.model.search.StructuralSearch;
+import com.epam.indigoeln.common.util.ModelUtil;
+import com.epam.indigoeln.compound.model.SampleDTO;
+import com.epam.indigoeln.compound.model.search.FindSamplesRequest;
+import com.epam.indigoeln.compound.model.search.SearchCatalog;
+import com.epam.indigoeln.eln.client.CompoundClient;
+import com.epam.indigoeln.eln.client.ExperimentClient;
+import com.epam.indigoeln.eln.client.MiscClient;
+import com.epam.indigoeln.eln.model.ExperimentDetailsDTO;
+import com.epam.indigoeln.eln.model.ExperimentStatus;
+import com.epam.indigoeln.eln.model.MutationResponse;
+import com.epam.indigoeln.reaction.model.ExperimentModel;
+import com.epam.indigoeln.reaction.model.InputAnchor;
+import com.epam.indigoeln.reaction.model.Reaction;
+import com.epam.indigoeln.reaction.model.ReactionInput;
+import com.epam.indigoeln.reaction.model.ReactionInputSample;
+import com.epam.indigoeln.reaction.model.ReactionOutput;
+import com.epam.indigoeln.reaction.model.ReactionOutputSample;
+import com.epam.indigoeln.reaction.model.ReactionRole;
+import com.epam.indigoeln.reaction.model.mutation.ExperimentMutation;
+import com.epam.indigoeln.reaction.model.mutation.Mutation;
+import com.epam.indigoeln.reaction.model.mutation.ReactionInputMutation;
+import com.epam.indigoeln.reaction.model.mutation.ReactionInputSampleMutation;
+import com.epam.indigoeln.reaction.model.mutation.ReactionMutation;
+import com.epam.indigoeln.reaction.model.mutation.ReactionOutputMutation;
+import com.google.common.base.Preconditions;
+import com.google.common.base.Supplier;
+import jakarta.ws.rs.core.Response;
+import lombok.Getter;
+import lombok.SneakyThrows;
+import lombok.experimental.Accessors;
+import one.util.streamex.EntryStream;
+import org.jspecify.annotations.Nullable;
+
+import java.io.File;
+import java.nio.file.Files;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+
+import static com.google.common.base.Preconditions.checkNotNull;
+
+@Accessors(fluent = true)
+public class ExperimentObject {
+
+    @Getter
+    private final UUID id;
+
+    @Nullable
+    private ExperimentDetailsDTO experiment;
+
+    @Nullable
+    private MutationResponse lastMutationResponse;
+
+    private final ExperimentClient experimentClient;
+    private final CompoundClient compoundClient;
+    private final MiscClient miscClient;
+
+    public ExperimentObject(UUID id, ExperimentClient experimentClient, CompoundClient compoundClient, MiscClient miscClient) {
+        this.id = id;
+        this.experimentClient = experimentClient;
+        this.compoundClient = compoundClient;
+        this.miscClient = miscClient;
+    }
+
+    public ExperimentObject(ExperimentDetailsDTO experiment, ExperimentClient experimentClient, CompoundClient compoundClient, MiscClient miscClient) {
+        this.id = experiment.getId();
+        this.experiment = experiment;
+        this.experimentClient = experimentClient;
+        this.compoundClient = compoundClient;
+        this.miscClient = miscClient;
+    }
+
+    public MutationResponse mutate(Mutation mutation) {
+        boolean undoOrRedo = mutation instanceof ExperimentMutation.Undo || mutation instanceof ExperimentMutation.Redo;
+        return mutate(mutation, !undoOrRedo);
+    }
+
+    public MutationResponse mutate(Mutation mutation, boolean undoRedo) {
+        MutationResponse response = experimentClient.mutateExperimentModel4(id, revision(), mutation);
+        lastMutationResponse = response;
+        invalidate();
+        return response;
+    }
+
+    /** {@code lastMutationResponse().getConflicts()}: field ids of user-entered values the last mutation overwrote, to why. */
+    public Map<String, String> lastConflicts() {
+        return lastMutationResponse().getConflicts();
+    }
+
+    public ExperimentDetailsDTO experiment() {
+        if (experiment == null) {
+            experiment = experimentClient.getExperiment(id);
+        }
+        return experiment;
+    }
+
+    public ExperimentModel model() {
+        return experiment().getModel();
+    }
+
+    public Reaction reaction() {
+        return getByIndex(model().getReactions(), 1, "Reaction");
+    }
+
+    public ReactionInput input(int inputNo) {
+        return getByIndex(reaction().getInputs(), inputNo, "Input");
+    }
+
+    public ReactionInputSample inputSample(int inputNo, int sampleNo) {
+        return getByIndex(input(inputNo).getSamples(), sampleNo, "Sample");
+    }
+
+    public ReactionOutput output(int outputNo) {
+        return getByIndex(reaction().getOutputs(), outputNo, "Output");
+    }
+
+    public ReactionOutputSample outputSample(int outputNo, int sampleNo) {
+        return getByIndex(output(outputNo).getSamples(), sampleNo, "Sample");
+    }
+
+    public MutationResponse lastMutationResponse() {
+        return checkNotNull(lastMutationResponse);
+    }
+
+    public String name() {
+        return experiment().getName();
+    }
+
+    public int revision() {
+        return experiment().getRevision();
+    }
+
+    public ExperimentStatus status() {
+        return experiment().getStatus();
+    }
+
+    public void mutateSetSchemeFromResource(String resourceName) {
+        String rxnfile = ModelUtil.loadResourceAsString(resourceName);
+        mutate(new ReactionMutation.SetScheme(reaction().getAnchor(), rxnfile));
+    }
+
+    public void mutateResolveInputs() {
+        Map<InputAnchor, UUID> sampleIDs = new HashMap<>();
+        Map<InputAnchor, String> requests = experimentClient.analyzeRXN(id, reaction().getAnchor());
+        Map<InputAnchor, SampleDTO> resolved = EntryStream.of(requests)
+                .mapToValuePartial((anchor, molfile) -> {
+                    FindSamplesRequest request = new FindSamplesRequest().withCatalog(SearchCatalog.SRS).withStructure(new StructuralSearch(StructuralSearch.Type.SUBSTRUCTURE, molfile));
+                    Page<SampleDTO> samples = compoundClient.search(request, Paging.DEFAULT);
+                    if (!samples.getItems().isEmpty()) {
+                        return Optional.of(samples.getItems().getFirst());
+                    }
+                    return Optional.empty();
+                })
+                .toMap();
+        mutate(new ReactionMutation.ResolveInputs(reaction().getAnchor(), resolved));
+    }
+
+    public void mutateSetInputMol(int inputNo, int sampleNo, @Nullable String mol) {
+        mutate(new ReactionInputSampleMutation.SetInputMol(inputSample(inputNo, sampleNo).getAnchor(), mol));
+    }
+
+    public void mutateSetInputWeight(int inputNo, int sampleNo, @Nullable String weight) {
+        mutate(new ReactionInputSampleMutation.SetInputWeight(inputSample(inputNo, sampleNo).getAnchor(), weight));
+    }
+
+    public void mutateSetInputVolume(int inputNo, int sampleNo, @Nullable String volume) {
+        mutate(new ReactionInputSampleMutation.SetInputVolume(inputSample(inputNo, sampleNo).getAnchor(), volume));
+    }
+
+    public void mutateSetInputDensity(int inputNo, int sampleNo, @Nullable String density) {
+        mutate(new ReactionInputSampleMutation.SetInputDensity(inputSample(inputNo, sampleNo).getAnchor(), density));
+    }
+
+    public void mutateAddEmptyInput() {
+        mutate(new ReactionMutation.AddEmptyInput(reaction().getAnchor()));
+    }
+
+    public void mutateAddProductSample(int outputNo) {
+        mutate(new ReactionOutputMutation.AddProductSample(output(outputNo).getAnchor()));
+    }
+
+    public void mutateAddNoProductSample() {
+        mutate(new ReactionMutation.AddNoProductSample(reaction().getAnchor()));
+    }
+
+    public void update(Runnable updater) {
+        updater.run();
+        invalidate();
+    }
+
+    public void update(Supplier<ExperimentDetailsDTO> updater) {
+        experiment = updater.get();
+    }
+
+    public void invalidate() {
+        experiment = null;
+    }
+
+    @SneakyThrows
+    public void generateDetailsReport(File destinationFile) {
+        System.err.println("Experiment details report is available at file://" + destinationFile.getAbsolutePath());
+        Files.write(destinationFile.toPath(), detailsReport());
+    }
+
+    public byte[] detailsReport() {
+        try (Response response = miscClient.generateExperimentDetailsReport(id)) {
+            return (byte[]) response.getEntity();
+        }
+    }
+
+    private static <T> T getByIndex(List<T> collection, int index, String collectionName) {
+        Preconditions.checkArgument(1 <= index && index <= collection.size(), "%s %s is out of bounds: [1, %s]", collectionName, index, collection.size());
+        return collection.get(index - 1);
+    }
+
+    public void mutateSetInputRowMol(int inputNo, @Nullable String mol) {
+        mutate(new ReactionInputMutation.SetInputRowMol(input(inputNo).getAnchor(), mol));
+    }
+
+    public void mutateSetInputMolarity(int inputNo, int sampleNo, @Nullable String molarity) {
+        mutate(new ReactionInputSampleMutation.SetInputMolarity(inputSample(inputNo, sampleNo).getAnchor(), molarity));
+    }
+
+    public void mutateSetInputPurity(int inputNo, int sampleNo, @Nullable String purity) {
+        mutate(new ReactionInputSampleMutation.SetInputPurity(inputSample(inputNo, sampleNo).getAnchor(), purity));
+    }
+
+    public void mutateSetInputRowEQ(int inputNo, @Nullable String eq) {
+        mutate(new ReactionInputMutation.SetInputRowEQ(input(inputNo).getAnchor(), eq));
+    }
+
+    public void mutateSetInputRowRole(int inputNo, ReactionRole role) {
+        mutate(new ReactionInputMutation.SetInputRowRole(input(inputNo).getAnchor(), role));
+    }
+
+    public void mutateSetInputRowLimiting(int inputNo) {
+        mutate(new ReactionInputMutation.SetInputRowLimiting(input(inputNo).getAnchor()));
+    }
+}

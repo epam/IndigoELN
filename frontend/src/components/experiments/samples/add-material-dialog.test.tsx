@@ -1,0 +1,204 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { makeExperimentDetails, SAMPLE_RESULTS } from '@/mocks/fixtures';
+
+import type { ReactNode } from 'react';
+import type { Page } from '@/lib/types/common.ts';
+import type { SampleDTO } from '@/lib/types/samples.ts';
+
+vi.mock('@/lib/auth', () => ({
+  auth: { getAccessToken: async () => 'token', requireLogin: async () => false, signOut: vi.fn() },
+}));
+
+/**
+ * Every request the sheet makes, path and body — where the endpoint contract is pinned, since
+ * `src/lib/api/samples.ts` keeps its fetchers private and a URL is only visible from a call site.
+ */
+const apiFetch = vi.fn();
+vi.mock('@/lib/api', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api');
+  return { ...actual, apiFetch: (path: string, init?: { json?: unknown }) => apiFetch(path, init) };
+});
+
+/** Ketcher is 21 MB behind a dynamic import; the sketcher is never opened here. */
+vi.mock('@/lib/ketcher', () => ({
+  renderStructure: vi.fn().mockResolvedValue('data:image/svg+xml,'),
+  prewarmKetcher: vi.fn(),
+}));
+
+const { AddMaterialDialog } = await import('@/components/experiments/samples/add-material-dialog');
+
+const EXPERIMENT = makeExperimentDetails();
+const REACTION = EXPERIMENT.model.reactions[0];
+const SEARCH_PATH = '/api/eln/samples/search?pageNo=0&pageSize=100';
+const MUTATE_PATH = `/api/eln/experiments/${EXPERIMENT.id}/mutate?revision=${EXPERIMENT.revision}`;
+
+function searchResult(items = SAMPLE_RESULTS): Page<SampleDTO> {
+  return { pageNo: 0, pageSize: 100, totalItems: items.length, totalPages: 1, hasMore: false, items };
+}
+
+/** The last JSON payload sent to a path — `apiFetch` serialises it, so this is the object. */
+function bodyOf(path: string): unknown {
+  const call = [...apiFetch.mock.calls].reverse().find(([requested]) => requested === path);
+  return call == null ? undefined : call[1].json;
+}
+
+function wrapper({ children }: { children: ReactNode }) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+}
+
+function renderDialog() {
+  return render(<AddMaterialDialog open onOpenChange={() => {}} experiment={EXPERIMENT} reaction={REACTION} />, {
+    wrapper,
+  });
+}
+
+/** Fills the quick-search box and presses Search, which is the shortest path to results. */
+async function search(term = 'aspirin') {
+  await userEvent.type(screen.getByRole('searchbox', { name: 'Quick search' }), term);
+  await userEvent.click(screen.getByRole('button', { name: 'Search' }));
+}
+
+beforeEach(() => {
+  apiFetch.mockReset();
+  apiFetch.mockImplementation((path: string) => {
+    if (path.startsWith('/api/eln/samples/search')) return Promise.resolve(searchResult());
+    if (path.includes('/mutate')) return Promise.resolve({ patch: {} });
+    if (path.startsWith('/api/eln/dictionaries/')) return Promise.resolve([]);
+    // The structure previews; no row is expanded, so nothing should ask.
+    return Promise.resolve('<svg />');
+  });
+});
+
+describe('AddMaterialDialog', () => {
+  /** Unlike Analyze RXN, the form starts empty — every keystroke is not a question. */
+  it('searches nothing until Search is pressed', async () => {
+    renderDialog();
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Quick search' }), 'aspirin');
+
+    expect(apiFetch).not.toHaveBeenCalledWith(SEARCH_PATH, expect.anything());
+
+    await userEvent.click(screen.getByRole('button', { name: 'Search' }));
+
+    await waitFor(() => expect(apiFetch).toHaveBeenCalledWith(SEARCH_PATH, expect.anything()));
+  });
+
+  it('sends the term to Sample Registration until another catalog is chosen', async () => {
+    renderDialog();
+    await search();
+
+    await waitFor(() => expect(bodyOf(SEARCH_PATH)).toMatchObject({ catalog: 'SRS', quickSearch: 'aspirin' }));
+  });
+
+  /**
+   * The backend would take a request carrying only a catalog, but a whole catalog answers nothing
+   * that was asked — and the first page of one is a PubChem round trip spent saying so.
+   */
+  it('refuses a search with no criteria', async () => {
+    renderDialog();
+    expect(screen.getByRole('button', { name: 'Search' })).toBeDisabled();
+
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Quick search' }), 'a');
+
+    expect(screen.getByRole('button', { name: 'Search' })).toBeEnabled();
+  });
+
+  /**
+   * The form looks filled in, but PubChem drops that filter on the way out — so Search stays
+   * held until the catalog is one that can honour it.
+   */
+  it('does not count a filter the chosen catalog would drop', async () => {
+    renderDialog();
+    await userEvent.click(screen.getByRole('button', { name: 'Advanced search' }));
+    await userEvent.type(screen.getByLabelText('Compound ID'), 'ASA');
+    expect(screen.getByRole('button', { name: 'Search' })).toBeEnabled();
+
+    await userEvent.click(screen.getByRole('radio', { name: 'PubChem' }));
+
+    expect(screen.getByRole('button', { name: 'Search' })).toBeDisabled();
+  });
+
+  it('carries an advanced filter once a catalog that supports it is chosen', async () => {
+    renderDialog();
+    await userEvent.click(screen.getByRole('radio', { name: 'My Materials' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Advanced search' }));
+    await userEvent.type(screen.getByLabelText('Compound ID'), 'ASA');
+    await userEvent.click(screen.getByRole('button', { name: 'Search' }));
+
+    await waitFor(() =>
+      expect(bodyOf(SEARCH_PATH)).toMatchObject({
+        catalog: 'MY_MATERIALS',
+        compoundKey: { type: 'exact', value: 'ASA' },
+      }),
+    );
+  });
+
+  /** PubChem takes a name, a formula or a structure; the rest would be dropped server-side. */
+  it('offers no fine-grained filters while PubChem is chosen', async () => {
+    renderDialog();
+    await userEvent.click(screen.getByRole('radio', { name: 'PubChem' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Advanced search' }));
+
+    expect(screen.getByLabelText('Compound ID')).toBeDisabled();
+    expect(screen.getByLabelText('Molecular Formula')).toBeEnabled();
+    expect(screen.getByText('PubChem does not support fine-grained search. Use quick search instead')).toBeVisible();
+
+    await userEvent.click(screen.getByRole('radio', { name: 'Sample Registration' }));
+
+    expect(screen.getByLabelText('Compound ID')).toBeEnabled();
+  });
+
+  it('appends an input row for a chosen sample, sending the hit back whole', async () => {
+    renderDialog();
+    await search();
+    await screen.findByText('Acetylsalicylic acid');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Add Acetylsalicylic acid to the stoichiometry' }));
+
+    await waitFor(() =>
+      expect(bodyOf(MUTATE_PATH)).toEqual({
+        type: 'AddInput',
+        anchor: REACTION.anchor,
+        sample: SAMPLE_RESULTS[0],
+        createdInputAnchor: expect.any(String),
+        createdSampleAnchor: expect.any(String),
+      }),
+    );
+  });
+
+  /**
+   * The sheet is mounted for the life of the page — that is what lets it slide out — so a reset
+   * on close is the only thing between a visit and the last one's search. It runs on
+   * `onOpenChangeComplete`, after the exit transition, which jsdom finishes immediately.
+   */
+  it('resets when the sheet is closed and opened again', async () => {
+    const { rerender } = renderDialog();
+    await search();
+    await screen.findByText('Acetylsalicylic acid');
+
+    rerender(<AddMaterialDialog open={false} onOpenChange={() => {}} experiment={EXPERIMENT} reaction={REACTION} />);
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+
+    rerender(<AddMaterialDialog open onOpenChange={() => {}} experiment={EXPERIMENT} reaction={REACTION} />);
+
+    expect(await screen.findByRole('searchbox', { name: 'Quick search' })).toHaveValue('');
+    expect(screen.queryByText('Acetylsalicylic acid')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Search' })).toBeDisabled();
+  });
+
+  it('clears the form and the results', async () => {
+    renderDialog();
+    await search();
+    await screen.findByText('Acetylsalicylic acid');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Clear All' }));
+
+    expect(screen.getByRole('searchbox', { name: 'Quick search' })).toHaveValue('');
+    expect(screen.queryByText('Acetylsalicylic acid')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Search' })).toBeDisabled();
+  });
+});

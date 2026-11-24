@@ -1,0 +1,264 @@
+package com.epam.indigoeln.eln.repository;
+
+import com.epam.indigoeln.common.exception.EntityNotFoundException;
+import com.epam.indigoeln.common.model.Page;
+import com.epam.indigoeln.common.model.Paging;
+import com.epam.indigoeln.common.model.SortOrder;
+import com.epam.indigoeln.eln.common.repository.BaseRepository;
+import com.epam.indigoeln.eln.entity.ExperimentEntity;
+import com.epam.indigoeln.eln.entity.ExperimentEntity_;
+import com.epam.indigoeln.eln.entity.ExperimentRevisionEntity;
+import com.epam.indigoeln.eln.entity.NotebookEntity;
+import com.epam.indigoeln.eln.entity.NotebookEntity_;
+import com.epam.indigoeln.eln.entity.ProjectEntity;
+import com.epam.indigoeln.eln.entity.UserEntity;
+import com.epam.indigoeln.eln.mapper.ExperimentMapper;
+import com.epam.indigoeln.eln.model.ApplicationPermission;
+import com.epam.indigoeln.eln.model.ExperimentDTO;
+import com.epam.indigoeln.eln.model.ExperimentRef;
+import com.epam.indigoeln.eln.model.ExperimentStatus;
+import com.epam.indigoeln.eln.service.ACLService;
+import com.epam.indigoeln.eln.service.UserService;
+import com.epam.indigoeln.eln.util.ELNCriteriaConditions;
+import com.google.common.base.MoreObjects;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import jakarta.persistence.Tuple;
+import jakarta.persistence.TypedQuery;
+import lombok.extern.slf4j.Slf4j;
+import one.util.streamex.StreamEx;
+import org.hibernate.query.criteria.CriteriaDefinition;
+import org.hibernate.query.criteria.JpaRoot;
+import org.jspecify.annotations.Nullable;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+
+import static com.epam.indigoeln.common.util.ModelUtil.map;
+
+@Slf4j
+@ApplicationScoped
+public class ExperimentRepository extends BaseRepository<ExperimentEntity> {
+
+    private static final String EXPERIMENT_PARAM = "experiment";
+
+    @Inject
+    ELNCriteriaConditions.Factory criteriaConditionsFactory;
+
+    public ExperimentRepository() {
+        super(ExperimentEntity.class);
+    }
+
+    @Inject
+    ExperimentMapper experimentMapper;
+    @Inject
+    ACLService aclService;
+    @Inject
+    UserService userService;
+
+    public Page<ExperimentDTO> findAll(UUID notebookId, @Nullable String search, @Nullable SortOrder sort, @Nullable UserEntity createdByUser, @Nullable List<ExperimentStatus> statuses, Paging paging, boolean showAll) {
+        CriteriaDefinition<Tuple> criteria = new CriteriaDefinition<>(em, Tuple.class) {{
+            JpaRoot<ExperimentEntity> root = from(ExperimentEntity.class);
+            select(tuple(root.id(), count(literal(1), createWindow())));
+            criteriaConditionsFactory.withConditions(this::where, conditions -> {
+                if (!showAll) {
+                    conditions.add(isNotNull(root.get(ExperimentEntity_.currentAccessOrNull)));
+                }
+                conditions.add(root.get(ExperimentEntity_.notebook).get(NotebookEntity_.id).equalTo(notebookId));
+                if (createdByUser != null) {
+                    conditions.add(root.get(ExperimentEntity_.createdBy).equalTo(createdByUser));
+                }
+                if (statuses != null && !statuses.isEmpty()) {
+                    conditions.add(root.get(ExperimentEntity_.status).in(statuses));
+                }
+                conditions.fullTextSearch(root.get(ExperimentEntity_.searchVector), search, root.get(ExperimentEntity_.name));
+            });
+            orderBy(switch (MoreObjects.firstNonNull(sort, SortOrder.LATEST)) {
+                case EARLIEST -> asc(root.get(ExperimentEntity_.modifiedAt));
+                case LATEST -> desc(root.get(ExperimentEntity_.modifiedAt));
+            });
+        }};
+
+        Page<ExperimentEntity> page = doFindWithTotals(
+                criteria,
+                paging,
+                em.getEntityGraph("Experiment.list")
+        );
+
+        return map(page, experimentMapper::entityToDTO);
+    }
+
+    public void lock(UUID id) {
+        // See ProjectRepository.lock for the reasoning
+        List<?> locked = em.createNativeQuery("select id from Experiment where id = ?1 for no key update")
+                .setParameter(1, id)
+                .getResultList();
+        if (locked.isEmpty()) {
+            throw new EntityNotFoundException("Experiment", id);
+        }
+    }
+
+    public ExperimentEntity load(UUID id) {
+        ExperimentEntity experiment = doLoad(id, em.getEntityGraph("Experiment.details"));
+        aclService.ensureAccess(experiment, ApplicationPermission.VIEW_EXPERIMENTS);
+        return experiment;
+    }
+
+    public ExperimentEntity loadAndLock(UUID id) {
+        lock(id);
+        return load(id);
+    }
+
+    public void markExperiment(UUID experimentId, UserEntity user, boolean mark) {
+        em.createNativeQuery("SELECT mark_experiment(?1, ?2, ?3)")
+                .setParameter(1, experimentId)
+                .setParameter(2, user.getId())
+                .setParameter(3, mark)
+                .getSingleResult();
+    }
+
+    public List<ExperimentDTO> findMarked(boolean showAll) {
+        TypedQuery<ExperimentEntity> query = !showAll
+                ? em.createQuery("from Experiment e where e.markedOrNull and currentAccessOrNull is not null order by name", ExperimentEntity.class)
+                : em.createQuery("from Experiment e where e.markedOrNull order by name", ExperimentEntity.class);
+        return map(query.getResultList(), experimentMapper::entityToDTO);
+    }
+
+    public List<ExperimentEntity> findByProjectWithACLEntities(ProjectEntity project) {
+        //noinspection unchecked
+        List<UUID> ids = em.createNativeQuery("select id from Experiment where project_id = ?1 for no key update", UUID.class)
+                .setParameter(1, project.getId())
+                .getResultList();
+        return doFindByIDs(ids, em.getEntityGraph("Experiment.withACL"));
+    }
+
+    public List<ExperimentEntity> findByNotebookWithACLEntities(NotebookEntity notebook) {
+        //noinspection unchecked
+        List<UUID> ids = em.createNativeQuery("select id from Experiment where notebook_id = ?1 for no key update", UUID.class)
+                .setParameter(1, notebook.getId())
+                .getResultList();
+        return doFindByIDs(ids, em.getEntityGraph("Experiment.withACL"));
+    }
+
+    @Nullable
+    public String getLastExperimentName(NotebookEntity notebook) {
+        List<@Nullable String> found = em.createQuery("select max(e.name) from Experiment e where e.notebook.id = ?1", String.class)
+                .setParameter(1, notebook.getId())
+                .getResultList();
+        return found.isEmpty() || found.getFirst() == null ? null : found.getFirst();
+    }
+
+    public UUID getProjectID(UUID experimentID) {
+        return em.createQuery("select project.id from Experiment where id = ?1", UUID.class)
+                .setParameter(1, experimentID)
+                .getSingleResult();
+    }
+
+    public void persistRevision(ExperimentRevisionEntity revision) {
+        em.persist(revision);
+    }
+
+    public ExperimentRevisionEntity getRevision(ExperimentEntity experiment, int revision) {
+        return em.createQuery("from ExperimentRevision where experiment = :experiment and revision = :revision", ExperimentRevisionEntity.class)
+                .setParameter(EXPERIMENT_PARAM, experiment)
+                .setParameter("revision", revision)
+                .getSingleResult();
+    }
+
+    public ExperimentRevisionEntity getVersion(ExperimentEntity experiment, int version) {
+        return em.createQuery("from ExperimentRevision where experiment = :experiment and version = :version", ExperimentRevisionEntity.class)
+                .setParameter(EXPERIMENT_PARAM, experiment)
+                .setParameter("version", version)
+                .getSingleResult();
+    }
+
+    public List<ExperimentRef> resolveRefs(Collection<UUID> ids) {
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        return em.createQuery("select new com.epam.indigoeln.eln.model.ExperimentRef(id, name) from Experiment where id in :ids", ExperimentRef.class)
+                .setParameter("ids", ids)
+                .getResultList();
+    }
+
+    public LinkedExperimentRefs resolveLinkedExperimentRefs(ExperimentEntity experiment) {
+        Set<UUID> ids = StreamEx.of(experiment.getLinkedExperiments())
+                .append(experiment.getContinuedFrom())
+                .append(experiment.getContinuedTo())
+                .toSet();
+        Map<UUID, String> names = StreamEx.of(resolveRefs(ids))
+                .toMap(ExperimentRef::getId, ExperimentRef::getName);
+        return new LinkedExperimentRefs(
+                toRefs(experiment.getLinkedExperiments(), names),
+                toRefs(experiment.getContinuedFrom(), names),
+                toRefs(experiment.getContinuedTo(), names)
+        );
+    }
+
+    private static List<ExperimentRef> toRefs(Set<UUID> ids, Map<UUID, String> names) {
+        return StreamEx.of(ids)
+                .mapToEntry(id -> id, names::get)
+                .nonNullValues()
+                .mapKeyValue(ExperimentRef::new)
+                .toList();
+    }
+
+    public List<ExperimentRef> suggest(@Nullable String search) {
+        if (search != null) {
+            return em.createQuery("select new com.epam.indigoeln.eln.model.ExperimentRef(id, name) from Experiment where name like :search order by name", ExperimentRef.class)
+                    .setParameter("search", search + '%')
+                    .setFirstResult(0)
+                    .setMaxResults(10)
+                    .getResultList();
+        }
+        return em.createQuery("select new com.epam.indigoeln.eln.model.ExperimentRef(id, name) from Experiment order by name", ExperimentRef.class)
+                .setFirstResult(0)
+                .setMaxResults(10)
+                .getResultList();
+    }
+
+    public Integer getLastUsedVersion(ExperimentEntity experiment) {
+        return em.createQuery("select max(version) from ExperimentRevision where experiment=:experiment", Integer.class)
+                .setParameter(EXPERIMENT_PARAM, experiment)
+                .getSingleResult();
+    }
+
+    public List<ExperimentRevisionEntity> findRecentRevisions(ExperimentEntity experiment, Duration period) {
+        return em.createQuery("from ExperimentRevision where experiment=:experiment and datetime>=:since order by revision", ExperimentRevisionEntity.class)
+                .setParameter(EXPERIMENT_PARAM, experiment)
+                .setParameter("since", Instant.now().minus(period))
+                .getResultList();
+    }
+
+    public List<ExperimentRevisionEntity> getRevisions(ExperimentEntity experiment, boolean reverseOrder) {
+        if (reverseOrder) {
+            return em.createQuery("from ExperimentRevision where experiment=:experiment order by revision desc", ExperimentRevisionEntity.class)
+                    .setParameter(EXPERIMENT_PARAM, experiment)
+                    .setHint(JAKARTA_PERSISTENCE_LOADGRAPH, "ExperimentRevision.list")
+                    .getResultList();
+        }
+        return em.createQuery("from ExperimentRevision where experiment=:experiment order by revision", ExperimentRevisionEntity.class)
+                .setParameter(EXPERIMENT_PARAM, experiment)
+                .setHint(JAKARTA_PERSISTENCE_LOADGRAPH, "ExperimentRevision.list")
+                .getResultList();
+    }
+
+    public List<ExperimentRevisionEntity> getRevisionRange(ExperimentEntity experiment, int revisionFrom) {
+        return em.createQuery("from ExperimentRevision where experiment=:experiment and revision>=:revisionFrom order by revision", ExperimentRevisionEntity.class)
+                .setParameter(EXPERIMENT_PARAM, experiment)
+                .setParameter("revisionFrom", revisionFrom)
+                .setHint(JAKARTA_PERSISTENCE_LOADGRAPH, "ExperimentRevision.range")
+                .getResultList();
+    }
+
+    public record LinkedExperimentRefs(
+            List<ExperimentRef> linkedExperiments,
+            List<ExperimentRef> continuedFrom,
+            List<ExperimentRef> continuedTo
+    ) {}
+}

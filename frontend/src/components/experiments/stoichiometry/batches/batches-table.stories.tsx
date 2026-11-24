@@ -1,0 +1,447 @@
+import { http, HttpResponse } from 'msw';
+import { expect, screen, userEvent, waitFor, within } from 'storybook/test';
+
+import { ProductBatchSummaryTable } from '@/components/experiments/stoichiometry/batches/batches-table';
+import { useExperiment } from '@/lib/api/experiments';
+import { makeExperimentDetails, makeReaction } from '@/mocks/fixtures';
+import { failingMutateHandlers, handlers, slowMutateHandlers } from '@/mocks/handlers';
+
+import type { Meta, StoryObj } from '@storybook/react-vite';
+
+const EXPERIMENT = makeExperimentDetails();
+const REACTION = EXPERIMENT.model.reactions[0];
+
+/** Records the mutations that actually reached the wire, so a story can assert the payload. */
+const sent: unknown[] = [];
+
+const spyHandlers = [
+  http.post('/api/eln/experiments/:id/mutate', async ({ request }) => {
+    sent.push(await request.json());
+    return HttpResponse.json({ patch: {} });
+  }),
+  ...handlers,
+];
+
+/**
+ * Renders off the query cache rather than the prop, so a mutation's patch flows back into the
+ * table the way it does in the app. Every story that asserts a payload uses it.
+ */
+function TableFromCache() {
+  const { data } = useExperiment(EXPERIMENT.id);
+  return data ? <ProductBatchSummaryTable experiment={data} reaction={data.model.reactions[0]} step={0} /> : null;
+}
+
+const meta = {
+  title: 'Experiments/Stoichiometry/Batches/ProductBatchSummaryTable',
+  component: ProductBatchSummaryTable,
+  args: { experiment: EXPERIMENT, reaction: REACTION, step: 0 },
+  parameters: { layout: 'padded' },
+} satisfies Meta<typeof ProductBatchSummaryTable>;
+
+export default meta;
+type Story = StoryObj<typeof meta>;
+
+/**
+ * Five batches across four products — including P3's, whose product is `intended: false`. That
+ * row is the reason this table exists: the products table filters it out, and a batch of
+ * something the reaction merely threw off has nowhere else to live.
+ */
+export const Default: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole('columnheader', { name: 'Total Weight, mg' })).toBeInTheDocument();
+    await expect(canvas.getAllByRole('row')).toHaveLength(6); // header + five batches
+    // The server's zero-padded short form, not the full notebook batch number.
+    await expect(canvas.getByText('001')).toBeInTheDocument();
+    await expect(canvas.getByText('005')).toBeInTheDocument();
+  },
+};
+
+/** Rows follow the batch number, not the order of the products the batches belong to. */
+export const SortedByBatchNumber: Story = {
+  args: { reaction: { ...REACTION, outputs: [...REACTION.outputs].reverse() } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    // Zero-padded, which is what tells a batch number from a bare quantity such as `246`.
+    const numbers = canvas.getAllByText(/^0\d{2}$/).map((cell) => cell.textContent);
+    await expect(numbers).toEqual(['001', '002', '003', '004', '005']);
+  },
+};
+
+/**
+ * Alignment is a property of the **column**, so a header and the cells under it cannot disagree —
+ * which is the whole reason a value used to look like it belonged to the column next door.
+ *
+ * The em-dash matters as much as the number: an empty numeric cell used to centre itself, so a
+ * column of values and blanks had no single edge to read down.
+ */
+export const ColumnsAlignAsOne: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+
+    const number = canvas.getByRole('columnheader', { name: 'Total Weight, mg' });
+    const text = canvas.getByRole('columnheader', { name: 'Product Name' });
+    const pill = canvas.getByRole('columnheader', { name: 'Product Type' });
+
+    await expect(number).toHaveClass('text-right');
+    await expect(text).toHaveClass('text-left');
+    await expect(pill).toHaveClass('text-center');
+
+    // The cells under them, including the one showing nothing.
+    const molarity = canvas.getByLabelText('Molarity, batch 003').closest('td');
+    await expect(molarity).toHaveClass('text-right');
+    await expect(molarity).toHaveTextContent('—');
+  },
+};
+
+/**
+ * Units are in the headers, read off the experiment and not editable here — the stoichiometry
+ * table is where they are picked. Yield and purity are percentages, though the wire carries them
+ * as `NO_UNIT`. The cells are bare numbers.
+ */
+export const UnitsAreInTheHeaders: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const display = (name: string) =>
+      canvas
+        .getByLabelText(name)
+        .closest('[data-slot="numeric-cell"]')!
+        .querySelector('[data-slot="numeric-cell-value"]');
+
+    const weight = canvas.getByRole('columnheader', { name: 'Total Weight, mg' });
+    await expect(within(weight).queryByRole('button')).not.toBeInTheDocument();
+    await expect(canvas.getByRole('columnheader', { name: 'Total Moles, mmol' })).toBeInTheDocument();
+    await expect(canvas.getByRole('columnheader', { name: 'Molarity, M' })).toBeInTheDocument();
+    await expect(canvas.getByRole('columnheader', { name: 'Yield, %' })).toBeInTheDocument();
+
+    await expect(display('Yield, batch 001')).toHaveTextContent(/^27\.5$/);
+    await expect(display('Purity, batch 001')).toHaveTextContent(/^98\.5$/);
+  },
+};
+
+/**
+ * The three row actions are one cell, not three columns. They used to be three 48px columns with
+ * a centred button each, which read as three unrelated columns and spread ~192px across a table
+ * that already scrolls.
+ */
+export const ActionsArePackedIntoOneCell: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const remove = canvas.getByRole('button', { name: 'Delete batch 001' });
+    const register = canvas.getByRole('button', { name: 'Register batch 001' });
+
+    await expect(remove.closest('td')).toBe(register.closest('td'));
+  },
+};
+
+/** The product type is a static pill here — the products table is where it is edited. */
+export const ProductTypeIsReadOnly: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getAllByText('Final').length).toBeGreaterThan(0);
+    await expect(canvas.getByText('Intermediate')).toBeInTheDocument();
+    await expect(canvas.queryByLabelText('Product Type, batch 001')).not.toBeInTheDocument();
+  },
+};
+
+/** One of the four editable numbers. Only the value is sent — the unit is the experiment's. */
+export const EditsTotalWeight: Story = {
+  parameters: { msw: { handlers: spyHandlers } },
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    sent.length = 0;
+    const canvas = within(canvasElement);
+
+    const input = await canvas.findByLabelText('Total Weight, batch 001');
+    await userEvent.click(input);
+    await userEvent.clear(input);
+    await userEvent.type(input, '500{Enter}');
+
+    await waitFor(() =>
+      expect(sent).toEqual([
+        {
+          type: 'SetOutputActualWeight',
+          anchor: 'ous00001',
+          actualWeight: '500',
+        },
+      ]),
+    );
+  },
+};
+
+/** Purity is an input to every other formula on the row, never an output of one. */
+export const EditsPurity: Story = {
+  parameters: { msw: { handlers: spyHandlers } },
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    sent.length = 0;
+    const canvas = within(canvasElement);
+
+    // A new batch starts at 100 % purity, so the cell has to be cleared before it is retyped.
+    const input = await canvas.findByLabelText('Purity, batch 002');
+    await userEvent.click(input);
+    await userEvent.clear(input);
+    await userEvent.type(input, '95{Enter}');
+
+    await waitFor(() => expect(sent).toEqual([{ type: 'SetOutputPurity', anchor: 'ous00002', purity: '95' }]));
+  },
+};
+
+/**
+ * Molarity is never calculated — it is entered, like purity — so it offers an input. The backend
+ * used to derive it from `actualMol / volume`.
+ */
+export const EditsMolarity: Story = {
+  parameters: { msw: { handlers: spyHandlers } },
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    sent.length = 0;
+    const canvas = within(canvasElement);
+
+    const input = await canvas.findByLabelText('Molarity, batch 001');
+    await userEvent.click(input);
+    await userEvent.clear(input);
+    await userEvent.type(input, '0.5{Enter}');
+
+    await waitFor(() => expect(sent).toEqual([{ type: 'SetOutputMolarity', anchor: 'ous00001', molarity: '0.5' }]));
+  },
+};
+
+/** Yield is computed by the backend, so it offers no input. */
+export const CalculatedColumnsAreReadOnly: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByLabelText('Molarity, batch 001')).toBeEnabled();
+    await expect(canvas.getByLabelText('Yield, batch 001')).toBeDisabled();
+    await expect(canvas.getByLabelText('Total Weight, batch 001')).toBeEnabled();
+  },
+};
+
+/**
+ * Sync is the one action keyed by the **output** anchor, and the only row it is offered on is the
+ * one whose product was never drawn in the scheme.
+ */
+export const SyncsWithProducts: Story = {
+  parameters: { msw: { handlers: spyHandlers } },
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    sent.length = 0;
+    const canvas = within(canvasElement);
+
+    await expect(
+      await canvas.findByRole('button', { name: 'P0 is already synced with Products (batch 001)' }),
+    ).toBeDisabled();
+    await userEvent.click(canvas.getByRole('button', { name: 'Sync P3 with Products (batch 005)' }));
+
+    await waitFor(() => expect(sent).toEqual([{ type: 'SetOutputRowIntended', anchor: 'out00004', intended: true }]));
+  },
+};
+
+/** Registration sends the batch to the compound registry. */
+export const RegistersBatch: Story = {
+  parameters: { msw: { handlers: spyHandlers } },
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    sent.length = 0;
+    const canvas = within(canvasElement);
+
+    await userEvent.click(await canvas.findByRole('button', { name: 'Register batch 001' }));
+
+    await waitFor(() => expect(sent).toEqual([{ type: 'RegisterSample', anchor: 'ous00001' }]));
+  },
+};
+
+/**
+ * A registered batch is a registry record: Register and Delete lock, and say why. Its **numbers
+ * do not** — the backend rejects a registered sample's compound mutations only, so disabling the
+ * numeric cells would forbid an edit it accepts.
+ */
+export const RegisteredBatchIsProtected: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole('button', { name: 'Batch 003 is already registered' })).toBeDisabled();
+    // Says why, as Register does: a disabled icon explains nothing by itself.
+    await expect(canvas.getByRole('button', { name: 'Registered batch cannot be deleted' })).toBeDisabled();
+    await expect(canvas.getByLabelText('Total Weight, batch 003')).toBeEnabled();
+  },
+};
+
+/**
+ * A failed registration is meant to be retried, so it is deliberately *not* protected — and the
+ * reason it failed is surfaced on the status cell.
+ */
+export const FailedRegistrationCanBeRetried: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole('button', { name: 'Register batch 004' })).toBeEnabled();
+    await expect(canvas.getByRole('button', { name: 'Delete batch 004' })).toBeEnabled();
+    await expect(canvas.getByText('Failed')).toHaveAttribute('title', 'Compound registry rejected the structure');
+  },
+};
+
+/** Deleting a batch leaves its product row alone — there is no mutation that removes one. */
+export const DeletesBatch: Story = {
+  parameters: { msw: { handlers: spyHandlers } },
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    sent.length = 0;
+    const canvas = within(canvasElement);
+
+    await userEvent.click(await canvas.findByRole('button', { name: 'Delete batch 002' }));
+
+    await waitFor(() => expect(sent).toEqual([{ type: 'RemoveProductSample', anchor: 'ous00002' }]));
+  },
+};
+
+/** `AddNoProductSample` is keyed by the **reaction** anchor, and creates the product too. */
+export const AddsEmptyBatch: Story = {
+  parameters: { msw: { handlers: spyHandlers } },
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    sent.length = 0;
+    const canvas = within(canvasElement);
+
+    await userEvent.click(await canvas.findByRole('button', { name: 'Add empty batch' }));
+
+    await waitFor(() =>
+      expect(sent).toEqual([
+        {
+          type: 'AddNoProductSample',
+          anchor: 'rxn00001',
+          createdOutputAnchor: expect.any(String),
+          createdSampleAnchor: expect.any(String),
+        },
+      ]),
+    );
+  },
+};
+
+/**
+ * The chevron opens `BatchDetailPanel`, which has its own stories — this only pins that the row
+ * expands the right batch and that the panel is closed until asked for.
+ */
+export const ExpandsDetail: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    // Closed by default — a detail panel is supporting material, not the point of the table.
+    await expect(canvas.queryByText(/^Notebook Batch #:/)).not.toBeInTheDocument();
+
+    await userEvent.click(canvas.getByRole('button', { name: 'Show details of batch 001' }));
+
+    await expect(await canvas.findByText('20260101-0001-001')).toBeInTheDocument();
+    await expect(canvas.getByRole('button', { name: 'Hide details of batch 001' })).toBeInTheDocument();
+  },
+};
+
+/** Search covers the batch number, the product name, the compound key and the status. */
+export const Search: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.type(canvas.getByRole('searchbox', { name: 'Search batches' }), 'registered');
+
+    await waitFor(async () => expect(canvas.getAllByRole('row')).toHaveLength(2)); // header + batch 003
+    await expect(canvas.getByText('003')).toBeInTheDocument();
+  },
+};
+
+/** A term that matches nothing says so, rather than reading as an empty table. */
+export const SearchMatchesNothing: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.type(canvas.getByRole('searchbox', { name: 'Search batches' }), 'zzz');
+    await expect(await canvas.findByText('No batch matches this search')).toBeInTheDocument();
+  },
+};
+
+/** A reaction whose products have no batches yet. */
+export const Empty: Story = {
+  args: { reaction: makeReaction({ outputs: [] }) },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText('No batch added')).toBeInTheDocument();
+  },
+};
+
+/** Permission is one gate. Every control is disabled and the data is all still readable. */
+export const ReadOnlyNoPermission: Story = {
+  args: { experiment: makeExperimentDetails({ currentPermissions: ['VIEW_EXPERIMENTS'] }) },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole('button', { name: 'Add empty batch' })).toBeDisabled();
+    await expect(canvas.getByRole('button', { name: 'Register batch 001' })).toBeDisabled();
+    await expect(canvas.getByLabelText('Total Weight, batch 001')).toBeDisabled();
+    // Exporting changes nothing, so it stays available without edit rights.
+    await expect(canvas.getByRole('button', { name: 'Export SDF' })).toBeEnabled();
+    await expect(canvas.getByText('001')).toBeInTheDocument();
+  },
+};
+
+/** Status is the other gate: a signed experiment is read-only to a user who holds everything. */
+export const ReadOnlySigned: Story = {
+  args: { experiment: makeExperimentDetails({ status: 'SIGNED' }) },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole('button', { name: 'Import SDF' })).toBeDisabled();
+    await expect(canvas.getByLabelText('Purity, batch 001')).toBeDisabled();
+  },
+};
+
+/** The cell being saved freezes and floats a spinner; the rest of the table stays live. */
+export const Saving: Story = {
+  parameters: { msw: { handlers: slowMutateHandlers } },
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole('button', { name: 'Delete batch 002' }));
+
+    await waitFor(async () => expect(await screen.findByRole('status', { name: '' })).toHaveTextContent('Saving…'));
+    // The neighbouring row's button is untouched — the overlay is scoped to one cell.
+    await expect(canvas.getByRole('button', { name: 'Delete batch 001' })).toBeEnabled();
+  },
+};
+
+/**
+ * Adding a batch is a write like any other, so the toolbar button reports it the way a cell does
+ * — a spinner over the button, and the button inert meanwhile so the batch cannot be added twice.
+ *
+ * Only past `SavingOverlay`'s 300 ms delay: the usual `AddNoProductSample` beats that and shows
+ * nothing, which is the point of the delay.
+ */
+export const AddingABatch: Story = {
+  parameters: { msw: { handlers: slowMutateHandlers } },
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+
+    await userEvent.click(await canvas.findByRole('button', { name: 'Add empty batch' }));
+
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Saving…'));
+
+    // The busy region is the button itself, not the toolbar: `SavingOverlay` publishes
+    // `data-saving` on the box it froze, and that box holds only this one button.
+    const busy = canvasElement.querySelector('[data-saving]');
+    await expect(busy).toContainElement(canvas.getByRole('button', { name: 'Add empty batch' }));
+    // So the rest of the toolbar stays live while the batch is on its way.
+    await expect(canvas.getByRole('button', { name: 'Export SDF' })).toBeEnabled();
+  },
+};
+
+/**
+ * Nothing is optimistic. A rejected save leaves the cell showing what the server last confirmed,
+ * and there is nothing to handle here beyond clearing the spinner.
+ */
+export const Failure: Story = {
+  parameters: { msw: { handlers: failingMutateHandlers } },
+  render: () => <TableFromCache />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const input = await canvas.findByLabelText('Purity, batch 002');
+
+    await userEvent.click(input);
+    await userEvent.clear(input);
+    await userEvent.type(input, '95{Enter}');
+
+    await waitFor(async () => expect(await canvas.findByLabelText('Purity, batch 002')).toBeEnabled());
+    const cell = canvas.getByLabelText('Purity, batch 002').closest('[data-slot="numeric-cell"]')!;
+    await expect(cell.querySelector('[data-slot="numeric-cell-value"]')).toHaveTextContent('100');
+  },
+};

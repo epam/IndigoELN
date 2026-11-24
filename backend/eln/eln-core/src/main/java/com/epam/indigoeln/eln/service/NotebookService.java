@@ -1,0 +1,117 @@
+package com.epam.indigoeln.eln.service;
+
+import com.epam.indigoeln.common.model.Page;
+import com.epam.indigoeln.common.model.Paging;
+import com.epam.indigoeln.common.model.SortOrder;
+import com.epam.indigoeln.eln.api.AccessForm;
+import com.epam.indigoeln.eln.config.DataAccess;
+import com.epam.indigoeln.eln.entity.NotebookEntity;
+import com.epam.indigoeln.eln.entity.ProjectEntity;
+import com.epam.indigoeln.eln.entity.UserEntity;
+import com.epam.indigoeln.eln.mapper.NotebookMapper;
+import com.epam.indigoeln.eln.model.*;
+import com.epam.indigoeln.eln.repository.NotebookRepository;
+import com.epam.indigoeln.eln.repository.ProjectRepository;
+import com.epam.indigoeln.reaction.model.NotebookSnapshot;
+import com.epam.indigoeln.reaction.model.mutation.NotebookMutation;
+import com.epam.indigoeln.reaction.service.mutation.MutationHandlerRegistry;
+import com.epam.indigoeln.reaction.service.mutation.MutationResult;
+import com.epam.indigoeln.reaction.service.mutation.notebook.AbstractNotebookMutationHandler;
+import com.epam.indigoeln.reaction.service.mutation.notebook.NotebookMutationContext;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import jakarta.transaction.Transactional;
+import jakarta.ws.rs.QueryParam;
+import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.Nullable;
+
+import java.util.EnumSet;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
+
+import static com.epam.indigoeln.eln.model.ApplicationPermission.*;
+
+@Slf4j
+@DataAccess
+@Transactional
+@ApplicationScoped
+public class NotebookService {
+
+    @Inject
+    NotebookRepository notebookRepository;
+    @Inject
+    NotebookMapper notebookMapper;
+    @Inject
+    UserService userService;
+    @Inject
+    ACLService aclService;
+    @Inject
+    ProjectRepository projectRepository;
+    @Inject
+    MutationHandlerRegistry mutationHandlerRegistry;
+
+    public NotebookDetailsDTO createNotebook(UUID projectId, NotebookRequest request) {
+        NotebookEntity notebook = new NotebookEntity();
+        projectRepository.lock(projectId); // protect project from possible ACL changes
+        ProjectEntity project = projectRepository.get(projectId);
+        project.getNotebooks().add(notebook);
+        notebook.setProject(project);
+        applyMutation(notebook, notebookMapper.requestToMutation(request));
+        return getNotebook(notebook.getId());
+    }
+
+    public Page<NotebookDTO> getNotebooks(UUID projectId, @Nullable String search, @QueryParam("sort") @Nullable SortOrder sort,
+                                          @QueryParam("createdByMe") @Nullable Boolean createdByMe, Paging paging) {
+        UserEntity currentUser = Boolean.TRUE.equals(createdByMe) ? userService.getCurrentUserEntity() : null;
+        boolean showAll = userService.getCurrentUser().getPermissions().contains(ApplicationPermission.VIEW_NOTEBOOKS);
+        return notebookRepository.findAll(projectId, search, sort, currentUser, paging, showAll);
+    }
+
+    public NotebookExistenceCheckDTO checkExistenceByName(String name) {
+        boolean exists = notebookRepository.existsByName(name);
+        return new NotebookExistenceCheckDTO(exists);
+    }
+
+    public String getNextNotebookNumber() {
+        String last = notebookRepository.getLastNotebookName();
+        int nextNumber = last == null ? 1 : Integer.parseInt(last) + 1;
+        return "%08d".formatted(nextNumber);
+    }
+
+    public NotebookDetailsDTO getNotebook(UUID notebookId) {
+        NotebookEntity notebook = notebookRepository.load(notebookId);
+        return getNotebookDetails(notebook);
+    }
+
+    private NotebookDetailsDTO getNotebookDetails(NotebookEntity notebook) {
+        Set<ApplicationPermission> currentPermissions = aclService.getCurrentPermissions(notebook.getCurrentAccess());
+        currentPermissions.retainAll(EnumSet.of(VIEW_NOTEBOOKS, EDIT_NOTEBOOKS, MANAGE_NOTEBOOK_ACCESS, DELETE_NOTEBOOKS, CREATE_EXPERIMENTS));
+        return notebookMapper.entityToDetailsDTO(notebook, currentPermissions);
+    }
+
+    public NotebookDetailsDTO editNotebook(UUID notebookId, NotebookEditRequest request) {
+        NotebookEntity notebook = notebookRepository.loadAndLock(notebookId);
+        applyMutation(notebook, notebookMapper.requestToMutation(request));
+        return getNotebookDetails(notebook);
+    }
+
+    public List<ACLEntryDTO> updateNotebookAccess(UUID notebookId, List<AccessForm> form) {
+        projectRepository.lock(notebookRepository.getProjectID(notebookId)); // protect project tree from changes
+        NotebookEntity notebook = notebookRepository.loadAndLock(notebookId); // project notebook itself from changes
+        projectRepository.loadWithACL(notebook.getProject().getId());
+        applyMutation(notebook, new NotebookMutation.EditNotebookAccess(form));
+        return notebookMapper.convertACLList(notebook.getEffectiveACL());
+    }
+
+    public MutationResult<NotebookSnapshot, NotebookMutationContext> applyMutation(NotebookEntity notebook, NotebookMutation mutation) {
+        log.debug("Mutating notebook {}: {}", notebook.getId(), mutation);
+        return mutationHandlerRegistry.withHandler(mutation, (AbstractNotebookMutationHandler<NotebookMutation> handler) -> handler.applyMutation(notebook, mutation));
+    }
+
+    public List<RevisionSummaryDTO> getNotebookRevisions(UUID notebookId) {
+        NotebookEntity notebook = notebookRepository.get(notebookId);
+        aclService.ensureAccess(notebook, ApplicationPermission.VIEW_NOTEBOOKS);
+        return notebookMapper.revisionToDTOList(notebookRepository.getRevisions(notebook));
+    }
+}
