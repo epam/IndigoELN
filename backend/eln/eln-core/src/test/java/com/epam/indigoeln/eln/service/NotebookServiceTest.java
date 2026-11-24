@@ -1,6 +1,5 @@
 package com.epam.indigoeln.eln.service;
 
-import com.epam.indigoeln.common.model.DocumentStatus;
 import com.epam.indigoeln.common.model.Page;
 import com.epam.indigoeln.common.model.Paging;
 import com.epam.indigoeln.common.model.SortOrder;
@@ -20,7 +19,6 @@ import com.epam.indigoeln.eln.model.NotebookRequest;
 import com.epam.indigoeln.eln.model.ProjectDetailsDTO;
 import com.epam.indigoeln.eln.model.ProjectRequest;
 import com.epam.indigoeln.eln.model.RevisionSummaryDTO;
-import com.epam.indigoeln.signature.model.DocumentDTO;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.security.TestSecurity;
 import jakarta.ws.rs.core.HttpHeaders;
@@ -32,18 +30,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInfo;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.TestMethodOrder;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.EnumSource;
 import org.openapitools.jackson.nullable.JsonNullable;
 
-import java.io.File;
-import java.nio.charset.StandardCharsets;
 import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
 import static com.epam.indigoeln.common.util.ContentDispositionUtil.extractFilename;
-import static com.epam.indigoeln.common.util.ContentDispositionUtil.generateContentDisposition;
 import static com.epam.indigoeln.eln.model.ApplicationPermission.CREATE_EXPERIMENTS;
 import static com.epam.indigoeln.eln.model.ApplicationPermission.DELETE_NOTEBOOKS;
 import static com.epam.indigoeln.eln.model.ApplicationPermission.EDIT_NOTEBOOKS;
@@ -53,9 +46,6 @@ import static com.epam.indigoeln.eln.test.ACLListAssert.assertThatACL;
 import static com.epam.indigoeln.test.ClientCallAssert.assertThatClientCall;
 import static com.epam.indigoeln.test.ClientUtil.uploadForm;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.doReturn;
 
 @QuarkusTest
 @TestSecurity(user = ELNBaseTest.JOHN_USERNAME)
@@ -325,18 +315,38 @@ class NotebookServiceTest extends ELNBaseTest {
         });
     }
 
-    @ParameterizedTest
-    @EnumSource(value = ExperimentStatus.class, names = {"OPEN", "REOPEN", "ARCHIVED", "SIGNED"},
-            mode = EnumSource.Mode.EXCLUDE)
-    void testEditNotebookWithIncompatibleExperimentStatus(ExperimentStatus experimentStatus) {
+    @Test
+    void testEditNotebookDeniedByCompletedExperiment() {
         final NotebookDetailsDTO notebook = createNotebook(project.getId(), "notebook description");
-        final ExperimentDetailsDTO experiment = createExperiment(notebook.getId(), experimentStatus);
-        assertThat(experiment.getStatus()).isEqualTo(experimentStatus);
+        ExperimentDetailsDTO experiment = experimentClient.createExperiment(
+                notebook.getId(), new ExperimentRequest(emptyTemplateID));
+        experiment = experimentClient.completeExperiment(experiment.getId());
+        assertThat(experiment.getStatus()).isEqualTo(ExperimentStatus.COMPLETED);
 
         final String newNotebookName = notebookClient.getNextNotebookNumber();
         assertThatClientCall(() -> notebookClient.editNotebook(notebook.getId(),
                 new NotebookEditRequest(JsonNullable.of(newNotebookName), JsonNullable.of("new desc"))))
-                .isBadRequest("You can rename a notebook with experiments only in status OPEN/REOPEN/ARCHIVED");
+                .isBadRequest("Notebook with experiments in status COMPLETED cannot be renamed");
+    }
+
+    @Test
+    void testEditNotebookDeniedByMultipleExperimentsStatuses() {
+        final NotebookDetailsDTO notebook = createNotebook(project.getId(), "notebook description");
+
+        ExperimentDetailsDTO exp1 = experimentClient.createExperiment(
+                notebook.getId(), new ExperimentRequest(emptyTemplateID));
+        exp1 = experimentClient.completeExperiment(exp1.getId());
+        assertThat(exp1.getStatus()).isEqualTo(ExperimentStatus.COMPLETED);
+
+        ExperimentDetailsDTO exp2 = experimentClient.createExperiment(
+                notebook.getId(), new ExperimentRequest(emptyTemplateID));
+        exp2 = experimentClient.cancelExperiment(exp2.getId());
+        assertThat(exp2.getStatus()).isEqualTo(ExperimentStatus.CANCELLED);
+
+        final String newNotebookName = notebookClient.getNextNotebookNumber();
+        assertThatClientCall(() -> notebookClient.editNotebook(notebook.getId(),
+                new NotebookEditRequest(JsonNullable.of(newNotebookName), JsonNullable.of("new desc"))))
+                .isBadRequest("Notebook with experiments in status COMPLETED/CANCELLED cannot be renamed");
     }
 
     @Test
@@ -421,52 +431,6 @@ class NotebookServiceTest extends ELNBaseTest {
                 .last().satisfies(revision -> {
                     assertThat(revision.getSummary()).isEqualTo("Edited Team: removed maggie");
                 });
-    }
-
-    private ExperimentDetailsDTO createExperiment(UUID notebookId, ExperimentStatus experimentStatus) {
-        final ExperimentDetailsDTO experiment = experimentClient.createExperiment(
-                notebookId, new ExperimentRequest(emptyTemplateID));
-
-        switch (experimentStatus) {
-            case COMPLETED:
-                return experimentClient.completeExperiment(experiment.getId());
-            case SUBMITTED:
-            case SIGNING:
-            case REJECTED:
-                experimentClient.completeExperiment(experiment.getId());
-
-                stubReport();
-                stubDocument(switch (experimentStatus) {
-                    case SUBMITTED -> DocumentStatus.SUBMITTED;
-                    case SIGNING -> DocumentStatus.SIGNING;
-                    case REJECTED -> DocumentStatus.REJECTED;
-                    default -> throw new IllegalStateException(
-                            "Unsupported experiment test status: " + experimentStatus);
-                });
-                final UUID signatureTemplateId = UUID.randomUUID();
-                return experimentClient.submitExperiment(experiment.getId(), signatureTemplateId);
-            case CANCELLED:
-                return experimentClient.cancelExperiment(experiment.getId());
-        }
-
-        throw new IllegalArgumentException("Unsupported experiment test status: " + experimentStatus);
-    }
-
-    private void stubReport() {
-        final Response reportResponse = Response.ok("\"PDF content\"".getBytes(StandardCharsets.UTF_8))
-                .header(HttpHeaders.CONTENT_DISPOSITION, generateContentDisposition(true, "report.pdf"))
-                .build();
-        doReturn(reportResponse)
-                .when(reportsClient)
-                .generateExperimentReport(any());
-    }
-
-    private void stubDocument(DocumentStatus documentStatus) {
-        final DocumentDTO document = new DocumentDTO();
-        document.setStatus(documentStatus);
-        doReturn(document)
-                .when(signatureClient)
-                .uploadDocumentClient(anyString(), any(UUID.class), any(UUID.class), any(File.class));
     }
 
     @Nested

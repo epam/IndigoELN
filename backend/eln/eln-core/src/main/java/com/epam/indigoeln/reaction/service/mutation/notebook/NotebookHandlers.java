@@ -21,6 +21,7 @@ import jakarta.inject.Inject;
 import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
@@ -55,11 +56,6 @@ class EditNotebookAttributesHandler extends AbstractNotebookMutationHandler<Note
 
     private static final Set<ExperimentStatus> COMPATIBLE_EXPERIMENT_STATUSES =
             EnumSet.of(ExperimentStatus.OPEN, ExperimentStatus.REOPEN, ExperimentStatus.ARCHIVED);
-    private static final String EXPERIMENT_STATUS_INCOMPATIBLE_MESSAGE = MessageFormat.format(
-            "You can rename a notebook with experiments only in status {0}",
-            COMPATIBLE_EXPERIMENT_STATUSES.stream()
-                    .map(ExperimentStatus::name)
-                    .collect(Collectors.joining("/")));
 
     @Inject
     ExperimentRepository experimentRepository;
@@ -99,11 +95,17 @@ class EditNotebookAttributesHandler extends AbstractNotebookMutationHandler<Note
     }
 
     private void validateExperimentsStatus(Collection<ExperimentEntity> experiments) {
-        final boolean allExperimentsWithCompatibleStatus = experiments.stream()
+        final Set<ExperimentStatus> incompatibleStatuses = experiments.stream()
                 .map(ExperimentEntity::getStatus)
-                .allMatch(COMPATIBLE_EXPERIMENT_STATUSES::contains);
-        if (!allExperimentsWithCompatibleStatus) {
-            throw new InvalidRequestException(EXPERIMENT_STATUS_INCOMPATIBLE_MESSAGE);
+                .filter(status -> !COMPATIBLE_EXPERIMENT_STATUSES.contains(status))
+                .collect(Collectors.toSet());
+        if (!incompatibleStatuses.isEmpty()) {
+            throw new InvalidRequestException(MessageFormat.format(
+                    "Notebook with experiments in status {0} cannot be renamed",
+                    incompatibleStatuses.stream()
+                            .sorted(Comparator.comparing(Enum::ordinal))
+                            .map(Enum::name)
+                            .collect(Collectors.joining("/"))));
         }
     }
 }
