@@ -1,8 +1,10 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMemo } from 'react';
 
 import { apiFetch } from '@/lib/api';
-import type { Page, UUID } from '@/lib/types/common.ts';
-import type { Template, TemplateDetails } from '@/lib/types/templates.ts';
+import { useSettledSearch } from '@/lib/api/collections';
+import type { CollectionFilters, Page, UUID } from '@/lib/types/common.ts';
+import type { Template, TemplateDetails, TemplateEditRequest, TemplateRequest } from '@/lib/types/templates.ts';
 
 /**
  * Exported although no component reads it: `src/lib/query-client.ts` hashes `list()` and matches
@@ -11,6 +13,9 @@ import type { Template, TemplateDetails } from '@/lib/types/templates.ts';
  */
 export const templateKeys = {
   list: () => ['templates'] as const,
+  // Under the list's root, so every write that invalidates the list refreshes these too — but a
+  // key of its own, so only the unfiltered list above is persisted.
+  filtered: (filters: CollectionFilters) => ['templates', filters] as const,
   detail: (id: UUID) => ['templateDetails', id] as const,
 };
 
@@ -26,8 +31,9 @@ function fetchTemplates(signal?: AbortSignal): Promise<Page<Template>> {
 }
 
 /**
- * Every template, for the Add Experiment picker. Enabled by the caller only while that dialog is
- * open, so a notebook page nobody creates from never asks.
+ * Every template — for the Add Experiment picker, which enables it only while that dialog is open
+ * so a notebook page nobody creates from never asks, and for the Templates screen, which always
+ * does.
  *
  * Two deliberate differences from `useNextNotebookNumber`, the other query a dialog's initializing
  * phase waits on:
@@ -53,12 +59,45 @@ export function useTemplates(enabled: boolean) {
   });
 }
 
+/**
+ * Every template's name, for refusing a taken one as it is typed — from the cached whole list,
+ * whatever filters the screen shows. `isPending` until it has loaded: a check against an empty
+ * list would pass any name, and the taken one would only surface when the backend refused it.
+ */
+export function useTemplateNames() {
+  const { data, isPending } = useTemplates(true);
+  const names = useMemo(() => (data?.items ?? []).map((template) => template.name), [data]);
+  return { names, isPending };
+}
+
+function fetchFilteredTemplates(filters: CollectionFilters, signal?: AbortSignal): Promise<Page<Template>> {
+  const params = new URLSearchParams({ sort: filters.sort, pageSize: String(TEMPLATE_PAGE_SIZE) });
+  if (filters.search) params.set('search', filters.search);
+  if (filters.createdByMe) params.set('createdByMe', 'true');
+  return apiFetch<Page<Template>>(`/api/eln/templates?${params}`, { signal });
+}
+
+/**
+ * The Templates screen's list, as its action bar filters it — searched, sorted and narrowed to
+ * the user's own on the server, in one page as big as `useTemplates`' for the same reason. The
+ * search is debounced the way every list's is (`useProjects`): the key follows the term as typed,
+ * and `enabled` waits for it to settle.
+ */
+export function useFilteredTemplates(filters: CollectionFilters) {
+  const settled = useSettledSearch(filters.search);
+  return useQuery({
+    queryKey: templateKeys.filtered(filters),
+    queryFn: ({ signal }) => fetchFilteredTemplates(filters, signal),
+    enabled: settled,
+  });
+}
+
 function fetchTemplate(id: UUID, signal?: AbortSignal): Promise<TemplateDetails> {
   return apiFetch<TemplateDetails>(`/api/eln/templates/${id}`, { signal });
 }
 
 /**
- * The template an experiment is laid out by. The id only exists once the experiment itself has
+ * The template an experiment is laid out by — and the one the template page shows. The id only exists once the experiment itself has
  * loaded, so this is the second of two chained queries and stays disabled until then — passing
  * `undefined` is the normal first render, not an error.
  */
@@ -72,5 +111,62 @@ export function useTemplate(id: UUID | undefined) {
     // and the save that follows would dehydrate a cache no longer holding it — taking it off
     // disk too. Every persisted query needs this.
     gcTime: Infinity,
+  });
+}
+
+function createTemplate(request: TemplateRequest): Promise<TemplateDetails> {
+  return apiFetch<TemplateDetails>('/api/eln/templates', { method: 'POST', json: request });
+}
+
+/**
+ * Creates a template. The answer is the whole detail, so it goes straight into the cache the
+ * Templates sheet and every experiment built on it read; the list is refetched for the new row.
+ */
+export function useCreateTemplate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: createTemplate,
+    onSuccess: (template) => {
+      queryClient.setQueryData(templateKeys.detail(template.id), template);
+      void queryClient.invalidateQueries({ queryKey: templateKeys.list() });
+    },
+  });
+}
+
+function renameTemplate(id: UUID, request: TemplateEditRequest): Promise<TemplateDetails> {
+  return apiFetch<TemplateDetails>(`/api/eln/templates/${id}`, { method: 'PATCH', json: request });
+}
+
+/**
+ * Renames a template — the one thing `PATCH /templates/{id}` changes. Experiments refer to their
+ * template by id, so nothing built on it notices.
+ */
+export function useRenameTemplate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, name }: { id: UUID; name: string }) => renameTemplate(id, { name }),
+    onSuccess: (template) => {
+      queryClient.setQueryData(templateKeys.detail(template.id), template);
+      void queryClient.invalidateQueries({ queryKey: templateKeys.list() });
+    },
+  });
+}
+
+function deleteTemplate(id: UUID): Promise<void> {
+  return apiFetch<void>(`/api/eln/templates/${id}`, { method: 'DELETE' });
+}
+
+/**
+ * Deletes a template. The backend refuses one an experiment was created from — the experiment
+ * keeps a foreign key to it — and that refusal is toasted like any failed mutation.
+ */
+export function useDeleteTemplate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: deleteTemplate,
+    onSuccess: (_, id) => {
+      queryClient.removeQueries({ queryKey: templateKeys.detail(id) });
+      void queryClient.invalidateQueries({ queryKey: templateKeys.list() });
+    },
   });
 }
