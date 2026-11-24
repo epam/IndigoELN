@@ -28,7 +28,6 @@ public class ComposeRunner {
         Map<String, String> composeEnv = new HashMap<>(env);
         composeEnv.put("QUARKUS_PROFILE", "integration-test");
         ComposeContainer container = new ComposeContainer(composeFile)
-                .withBuild(true)
                 .withPull(false)
                 .withRemoveVolumes(true)
                 .withTailChildContainers(true)

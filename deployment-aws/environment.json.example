@@ -1,6 +1,7 @@
+// rename to <<environment-name>>.json, remove comments and edit according to your environment
 {
   // AWS account number
-  "account": "12345678",
+  "account": "123456789012",
   // region
   "region": "us-east-1",
   // application DNS domain

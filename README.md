@@ -56,7 +56,7 @@ cd IndigoELN/deployment-compose
 
 The `indigo-eln` Keycloak realm — including users, roles, and clients — is provisioned declaratively from `deployment-compose/keycloak-config-cli/realm-config.json` on first start. Edit that file to add or change users.
 
-Two test users are seeded out of the box:
+One test user is seeded out of the box:
 
 | Username | Password |
 |---|---|
@@ -101,6 +101,14 @@ docker build -t indigoeln/frontend:built \
 
 then add `FRONTEND_IMAGE=indigoeln/frontend:built` to the variables above.
 
+Likewise for PostgreSQL (the `combined` target creates the application databases):
+
+```bash
+docker build -t indigoeln/postgres-combined:built --platform linux/amd64 --target combined postgres
+```
+
+then add `POSTGRES_IMAGE=indigoeln/postgres-combined:built`.
+
 
 ## Installation on AWS
 
@@ -112,7 +120,7 @@ The application images are pulled from AWS Public Container Registry by default;
 
 - AWS CLI, with `AWS_PROFILE` set to the profile to deploy with (`deploy.sh` passes it to `cdk`), and the Session Manager plugin for connecting to the instance
 - AWS CDK CLI (requires Node.js)
-- Maven and JDK 17 (`deploy.sh` sets `JAVA_HOME=/usr/lib/jvm/java-17-openjdk`; adjust if yours lives elsewhere)
+- Maven and JDK 17 (see the `JAVA_HOME` note under [Deploy CDK stack](#deploy-cdk-stack))
 - An existing VPC and a Route 53 hosted zone; the application domain must belong to that zone, as the TLS certificate is validated through DNS
 
 ### Get the code
@@ -143,6 +151,8 @@ cdk bootstrap aws://<<account>>/us-east-1 --template cdk-bootstrap.yaml
 If you use `permissionBoundary`, add `--custom-permissions-boundary <<policy-name>>`.
 
 ### Deploy CDK stack
+
+**NB**: The CDK sources build with JDK 17 only; newer JDKs break Lombok. `deploy.sh` sets `JAVA_HOME=/usr/lib/jvm/java-17-openjdk`, whatever `JAVA_HOME` your shell has. If your JDK 17 is installed elsewhere (e.g. `/usr/lib/jvm/java-17-openjdk-amd64` on Debian/Ubuntu, or `$(/usr/libexec/java_home -v 17)` on macOS), edit that line in `deploy.sh` first.
 
 Run CDK deployment (stack-name is "indigoeln-" plus environment name):
 ```bash

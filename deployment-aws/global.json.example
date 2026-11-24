@@ -1,11 +1,11 @@
 // rename to global.json, remove comments and edit according to your environment
 {
   // AWS account number
-  "account": "12345678",
+  "account": "123456789012",
   // region
   "region": "us-east-1",
   // optional: if set, all created roles will use this permission boundary
-  "permissionBoundary": "arn:aws:iam::12345678:policy/role_boundary",
+  "permissionBoundary": "arn:aws:iam::123456789012:policy/role_boundary",
   // existing VPC where application will run
   "vpc": "vpc-12345678",
   // created resources will use these security groups
