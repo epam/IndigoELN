@@ -10,7 +10,12 @@ import com.epam.indigoeln.eln.repository.ExperimentRepository;
 import com.epam.indigoeln.eln.repository.NotebookAttachmentRepository;
 import com.epam.indigoeln.eln.repository.ProjectRepository;
 import com.epam.indigoeln.eln.service.AttachmentService;
+import com.epam.indigoeln.reaction.model.ExperimentModel;
 import com.epam.indigoeln.reaction.model.NotebookSnapshot;
+import com.epam.indigoeln.reaction.model.Reaction;
+import com.epam.indigoeln.reaction.model.ReactionOutput;
+import com.epam.indigoeln.reaction.model.ReactionOutputSample;
+import com.epam.indigoeln.reaction.model.SampleRegistrationStatus;
 import com.epam.indigoeln.reaction.model.mutation.ExperimentMutation;
 import com.epam.indigoeln.reaction.model.mutation.NotebookMutation;
 import com.epam.indigoeln.reaction.service.ExperimentModelService;
@@ -84,6 +89,7 @@ class EditNotebookAttributesHandler extends AbstractNotebookMutationHandler<Note
             List<ExperimentEntity> experiments = experimentRepository.findByNotebookWithACLEntities(notebook);
 
             validateExperimentsStatus(experiments);
+            validateOutputStatus(experiments);
 
             for (ExperimentEntity experiment : experiments) {
                 experimentModelService.applyMutation(experiment, new ExperimentMutation.ExperimentNameUpdated(newNotebookName));
@@ -106,6 +112,22 @@ class EditNotebookAttributesHandler extends AbstractNotebookMutationHandler<Note
                             .sorted(Comparator.comparing(Enum::ordinal))
                             .map(Enum::name)
                             .collect(Collectors.joining("/"))));
+        }
+    }
+
+    private void validateOutputStatus(Collection<ExperimentEntity> experiments) {
+        final boolean anySampleRegistered = experiments.stream()
+                .map(ExperimentEntity::getModel)
+                .map(ExperimentModel::getReactions)
+                .flatMap(Collection::stream)
+                .map(Reaction::getOutputs)
+                .flatMap(Collection::stream)
+                .map(ReactionOutput::getSamples)
+                .flatMap(Collection::stream)
+                .map(ReactionOutputSample::getRegistrationStatus)
+                .anyMatch(status -> status == SampleRegistrationStatus.REGISTERED);
+        if (anySampleRegistered) {
+            throw new InvalidRequestException("Notebook with sample in status REGISTERED cannot be renamed");
         }
     }
 }
