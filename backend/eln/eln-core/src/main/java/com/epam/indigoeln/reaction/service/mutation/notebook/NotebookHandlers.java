@@ -1,14 +1,21 @@
 package com.epam.indigoeln.reaction.service.mutation.notebook;
 
+import com.epam.indigoeln.common.exception.InvalidRequestException;
 import com.epam.indigoeln.eln.entity.ExperimentEntity;
 import com.epam.indigoeln.eln.entity.NotebookAttachment;
 import com.epam.indigoeln.eln.entity.NotebookEntity;
 import com.epam.indigoeln.eln.model.ApplicationPermission;
+import com.epam.indigoeln.eln.model.ExperimentStatus;
 import com.epam.indigoeln.eln.repository.ExperimentRepository;
 import com.epam.indigoeln.eln.repository.NotebookAttachmentRepository;
 import com.epam.indigoeln.eln.repository.ProjectRepository;
 import com.epam.indigoeln.eln.service.AttachmentService;
+import com.epam.indigoeln.reaction.model.ExperimentModel;
 import com.epam.indigoeln.reaction.model.NotebookSnapshot;
+import com.epam.indigoeln.reaction.model.Reaction;
+import com.epam.indigoeln.reaction.model.ReactionOutput;
+import com.epam.indigoeln.reaction.model.ReactionOutputSample;
+import com.epam.indigoeln.reaction.model.SampleRegistrationStatus;
 import com.epam.indigoeln.reaction.model.mutation.ExperimentMutation;
 import com.epam.indigoeln.reaction.model.mutation.NotebookMutation;
 import com.epam.indigoeln.reaction.service.ExperimentModelService;
@@ -16,8 +23,14 @@ import com.epam.indigoeln.reaction.service.mutation.MutationHandlerFor;
 import jakarta.enterprise.context.Dependent;
 import jakarta.inject.Inject;
 
+import java.text.MessageFormat;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import static com.epam.indigoeln.common.exception.InvalidRequestException.validate;
 import static com.epam.indigoeln.common.util.ModelUtil.editProperty;
@@ -46,6 +59,9 @@ class CreateNotebookHandler extends AbstractNotebookMutationHandler<NotebookMuta
 @MutationHandlerFor(NotebookMutation.EditNotebookAttributes.class)
 class EditNotebookAttributesHandler extends AbstractNotebookMutationHandler<NotebookMutation.EditNotebookAttributes> {
 
+    private static final Set<ExperimentStatus> COMPATIBLE_EXPERIMENT_STATUSES =
+            EnumSet.of(ExperimentStatus.OPEN, ExperimentStatus.REOPEN, ExperimentStatus.ARCHIVED);
+
     @Inject
     ExperimentRepository experimentRepository;
     @Inject
@@ -71,6 +87,10 @@ class EditNotebookAttributesHandler extends AbstractNotebookMutationHandler<Note
         if (nameChanged) {
             String newNotebookName = mutation.name().get();
             List<ExperimentEntity> experiments = experimentRepository.findByNotebookWithACLEntities(notebook);
+
+            validateExperimentsStatus(experiments);
+            validateOutputStatus(experiments);
+
             for (ExperimentEntity experiment : experiments) {
                 experimentModelService.applyMutation(experiment, new ExperimentMutation.ExperimentNameUpdated(newNotebookName));
             }
@@ -78,6 +98,37 @@ class EditNotebookAttributesHandler extends AbstractNotebookMutationHandler<Note
 
         validate(updated, "Nothing to update");
         return entityMutationHelper.formatEditAttributesSummary(summaryList);
+    }
+
+    private void validateExperimentsStatus(Collection<ExperimentEntity> experiments) {
+        final Set<ExperimentStatus> incompatibleStatuses = experiments.stream()
+                .map(ExperimentEntity::getStatus)
+                .filter(status -> !COMPATIBLE_EXPERIMENT_STATUSES.contains(status))
+                .collect(Collectors.toSet());
+        if (!incompatibleStatuses.isEmpty()) {
+            throw new InvalidRequestException(MessageFormat.format(
+                    "Notebook with experiments in status {0} cannot be renamed",
+                    incompatibleStatuses.stream()
+                            .sorted(Comparator.comparing(Enum::ordinal))
+                            .map(Enum::name)
+                            .collect(Collectors.joining("/"))));
+        }
+    }
+
+    private void validateOutputStatus(Collection<ExperimentEntity> experiments) {
+        final boolean anySampleRegistered = experiments.stream()
+                .map(ExperimentEntity::getModel)
+                .map(ExperimentModel::getReactions)
+                .flatMap(Collection::stream)
+                .map(Reaction::getOutputs)
+                .flatMap(Collection::stream)
+                .map(ReactionOutput::getSamples)
+                .flatMap(Collection::stream)
+                .map(ReactionOutputSample::getRegistrationStatus)
+                .anyMatch(status -> status == SampleRegistrationStatus.REGISTERED);
+        if (anySampleRegistered) {
+            throw new InvalidRequestException("Notebook with sample in status REGISTERED cannot be renamed");
+        }
     }
 }
 

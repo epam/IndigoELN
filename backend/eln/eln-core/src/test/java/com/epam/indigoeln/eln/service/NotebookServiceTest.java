@@ -10,6 +10,7 @@ import com.epam.indigoeln.eln.model.AccessLevel;
 import com.epam.indigoeln.eln.model.AttachmentDTO;
 import com.epam.indigoeln.eln.model.ExperimentDetailsDTO;
 import com.epam.indigoeln.eln.model.ExperimentRequest;
+import com.epam.indigoeln.eln.model.ExperimentStatus;
 import com.epam.indigoeln.eln.model.NotebookDTO;
 import com.epam.indigoeln.eln.model.NotebookDetailsDTO;
 import com.epam.indigoeln.eln.model.NotebookEditRequest;
@@ -45,7 +46,6 @@ import static com.epam.indigoeln.eln.test.ACLListAssert.assertThatACL;
 import static com.epam.indigoeln.test.ClientCallAssert.assertThatClientCall;
 import static com.epam.indigoeln.test.ClientUtil.uploadForm;
 import static org.assertj.core.api.Assertions.assertThat;
-
 
 @QuarkusTest
 @TestSecurity(user = ELNBaseTest.JOHN_USERNAME)
@@ -313,6 +313,40 @@ class NotebookServiceTest extends ELNBaseTest {
             assertThat(revision.getSummary()).contains(oldNotebookName);
             assertThat(revision.getSummary()).contains(newNotebookName);
         });
+    }
+
+    @Test
+    void testEditNotebookDeniedByCompletedExperiment() {
+        final NotebookDetailsDTO notebook = createNotebook(project.getId(), "notebook description");
+        ExperimentDetailsDTO experiment = experimentClient.createExperiment(
+                notebook.getId(), new ExperimentRequest(emptyTemplateID));
+        experiment = experimentClient.completeExperiment(experiment.getId());
+        assertThat(experiment.getStatus()).isEqualTo(ExperimentStatus.COMPLETED);
+
+        final String newNotebookName = notebookClient.getNextNotebookNumber();
+        assertThatClientCall(() -> notebookClient.editNotebook(notebook.getId(),
+                new NotebookEditRequest(JsonNullable.of(newNotebookName), JsonNullable.of("new desc"))))
+                .isBadRequest("Notebook with experiments in status COMPLETED cannot be renamed");
+    }
+
+    @Test
+    void testEditNotebookDeniedByMultipleExperimentsStatuses() {
+        final NotebookDetailsDTO notebook = createNotebook(project.getId(), "notebook description");
+
+        ExperimentDetailsDTO exp1 = experimentClient.createExperiment(
+                notebook.getId(), new ExperimentRequest(emptyTemplateID));
+        exp1 = experimentClient.completeExperiment(exp1.getId());
+        assertThat(exp1.getStatus()).isEqualTo(ExperimentStatus.COMPLETED);
+
+        ExperimentDetailsDTO exp2 = experimentClient.createExperiment(
+                notebook.getId(), new ExperimentRequest(emptyTemplateID));
+        exp2 = experimentClient.cancelExperiment(exp2.getId());
+        assertThat(exp2.getStatus()).isEqualTo(ExperimentStatus.CANCELLED);
+
+        final String newNotebookName = notebookClient.getNextNotebookNumber();
+        assertThatClientCall(() -> notebookClient.editNotebook(notebook.getId(),
+                new NotebookEditRequest(JsonNullable.of(newNotebookName), JsonNullable.of("new desc"))))
+                .isBadRequest("Notebook with experiments in status COMPLETED/CANCELLED cannot be renamed");
     }
 
     @Test
