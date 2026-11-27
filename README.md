@@ -9,7 +9,7 @@ The Open-Source Chemistry Electronic Lab Notebook
 
 ## Rebuilt for the Way Chemists Work Today
 
-We didn't just add features to the old system. We rebuilt Indigo ELN from scratch: new backend, new interface, new database. Every screen and every workflow was designed again with one question in mind: *how do we make the scientist's day easier?*
+We rebuilt Indigo ELN from scratch: new backend, new interface, new database. Every screen and every workflow was designed again with one question in mind: *how do we make the scientist's day easier?*
 
 The result is the fastest, most capable and most enjoyable version of Indigo ELN we've ever released.
 
